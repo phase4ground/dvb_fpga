@@ -110,10 +110,19 @@ package body dvb_utils_pkg is
     return std_logic_vector(to_unsigned(code_rate_t'pos(v), CODE_RATE_WIDTH));
   end;
 
+  function is_01 ( constant v : std_logic_vector ) return boolean is
+  begin
+    for i in v'range loop
+      if v(i) /= '0' and v(i) /= '1' then
+        return False;
+      end if;
+    end loop;
+    return True;
+  end;
 
   function decode( constant v : std_logic_vector ) return frame_type_t is
   begin
-    if to_x01(v) /= v then
+    if not is_01(v) then
       return not_set;
     end if;
     return frame_type_t'val(to_integer(unsigned(to_x01(v))));
@@ -121,7 +130,7 @@ package body dvb_utils_pkg is
 
   function decode( constant v : std_logic_vector ) return constellation_t is
   begin
-    if to_x01(v) /= v then
+    if not is_01(v) then
       return not_set;
     end if;
     return constellation_t 'val(to_integer(unsigned(v)));
@@ -129,7 +138,7 @@ package body dvb_utils_pkg is
 
   function decode( constant v : std_logic_vector ) return code_rate_t is
   begin
-    if to_x01(v) /= v then
+    if not is_01(v) then
       return not_set;
     end if;
     return code_rate_t'val(to_integer(unsigned(v)));
