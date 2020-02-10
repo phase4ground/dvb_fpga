@@ -18,8 +18,6 @@
 -- You should have received a copy of the GNU General Public License
 -- along with DVB FPGA.  If not, see <http://www.gnu.org/licenses/>.
 
-use std.textio.all;
-
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;

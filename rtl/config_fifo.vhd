@@ -36,8 +36,7 @@ use work.dvb_utils_pkg.all;
 ------------------------
 entity config_fifo is
   generic (
-    FIFO_DEPTH          : integer := 4;
-    RAM_INFERENCE_STYLE : string := "distributed"
+    FIFO_DEPTH : integer := 4
   );
   port (
     -- Usual ports
@@ -61,71 +60,50 @@ end config_fifo;
 
 architecture config_fifo of config_fifo is
 
-  -----------
-  -- Types --
-  -----------
+  ---------------
+  -- Constants --
+  ---------------
   constant DATA_WIDTH : integer := FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH + CODE_RATE_WIDTH;
 
   -------------
   -- Signals --
   -------------
-  signal wr_data : std_logic_vector(DATA_WIDTH - 1 downto 0);
-  signal rd_data : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal wr_data   : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal rd_data   : std_logic_vector(DATA_WIDTH - 1 downto 0);
 
-  signal wr_tready : std_logic;
   signal rd_tvalid : std_logic;
+  signal full_i    : std_logic;
+  signal empty_i   : std_logic;
 
 begin
 
   -------------------
   -- Port mappings --
   -------------------
-  -- fifo_u : entity work.axi_stream_fifo
-  --   generic map (
-  --     FIFO_DEPTH          => FIFO_DEPTH,
-  --     DATA_WIDTH          => DATA_WIDTH,
-  --     RAM_INFERENCE_STYLE => RAM_INFERENCE_STYLE)
-  --   port map (
-  --     -- Usual ports
-  --     clk      => clk,
-  --     rst      => rst,
-
-  --     -- Write side
-  --     s_tvalid => wr_en,
-  --     s_tready => wr_tready,
-  --     s_tdata  => wr_data,
-  --     s_tlast  => '0',
-
-  --     -- Read side
-  --     m_tvalid => rd_tvalid,
-  --     m_tready => rd_en,
-  --     m_tdata  => rd_data,
-  --     m_tlast  => open);
-
-  fifo_b_u : entity work.axi_stream_master_adapter
-  generic map (
-    MAX_SKEW_CYCLES => 4,
-    TDATA_WIDTH     => DATA_WIDTH)
-  port map (
-    -- Usual ports
-    clk      => clk,
-    reset    => rst,
-    -- wanna-be AXI interface
-    wr_en    => wr_en,
-    wr_full  => full,
-    wr_data  => wr_data,
-    wr_last  => '0',
-    -- AXI master
-    m_tvalid => rd_tvalid,
-    m_tready => rd_en,
-    m_tdata  => rd_data,
-    m_tlast  => open);
+  -- TODO: Put an ordinary FIFO here
+  fifo_u : entity work.axi_stream_master_adapter
+    generic map (
+      MAX_SKEW_CYCLES => FIFO_DEPTH,
+      TDATA_WIDTH     => DATA_WIDTH)
+    port map (
+      -- Usual ports
+      clk      => clk,
+      reset    => rst,
+      -- wanna-be AXI interface
+      wr_en    => wr_en,
+      wr_full  => full_i,
+      wr_data  => wr_data,
+      wr_last  => '0',
+      -- AXI master
+      m_tvalid => rd_tvalid,
+      m_tready => rd_en,
+      m_tdata  => rd_data,
+      m_tlast  => open);
 
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
-  -- full  <= not wr_tready;
-  empty <= not rd_tvalid;
+  empty_i <= not rd_tvalid;
 
   -- Squeeze config in
   wr_data <= encode(code_rate_i) &
@@ -136,6 +114,24 @@ begin
   code_rate_o     <= decode(rd_data(rd_data'length - 1 downto FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH));
   constellation_o <= decode(rd_data(FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH - 1 downto FRAME_TYPE_WIDTH));
   frame_type_o    <= decode(rd_data(FRAME_TYPE_WIDTH - 1 downto 0));
+
+  full            <= full_i;
+  empty           <= empty_i;
+
+  process(clk, rst)
+  begin
+    if rst = '0' then
+      if rising_edge(clk) then
+        assert not (wr_en = '1' and full_i = '1')
+          report "Config FIFO overflow"
+          severity Failure;
+
+        assert not (rd_en = '1' and empty_i = '1')
+          report "Config FIFO overflow"
+          severity Failure;
+      end if;
+    end if;
+  end process;
 
 end config_fifo;
 

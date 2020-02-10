@@ -77,78 +77,81 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   -------------
   -- Signals --
   -------------
-  signal s_axi_dv             : std_logic;
-  signal s_tready_i           : std_logic;
-  signal s_axi_dv_reg         : std_logic;
-  signal s_tlast_reg          : std_logic;
-  signal s_tdata_reg          : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal s_axi_dv                  : std_logic;
+  signal s_tready_i                : std_logic;
+  signal s_axi_dv_reg              : std_logic;
+  signal s_tlast_reg               : std_logic;
+  signal s_tdata_reg               : std_logic_vector(DATA_WIDTH - 1 downto 0);
 
   -- RAM base pointers to handle back to back frames by writing and reading from different
   -- regions of the RAM. This will introduce 1 frame of latency though
-  signal ram_ptr_diff         : unsigned(RAM_PTR_WIDTH - 1 downto 0);
-  signal wr_ram_ptr           : unsigned(RAM_PTR_WIDTH - 1 downto 0);
-  signal rd_ram_ptr           : unsigned(RAM_PTR_WIDTH - 1 downto 0);
+  signal ram_ptr_diff              : unsigned(RAM_PTR_WIDTH - 1 downto 0);
+  signal wr_ram_ptr                : unsigned(RAM_PTR_WIDTH - 1 downto 0);
+  signal rd_ram_ptr                : unsigned(RAM_PTR_WIDTH - 1 downto 0);
 
   -- Write side config
-  signal cfg_wr_constellation : constellation_t;
-  signal cfg_wr_frame_type    : frame_type_t;
-  signal cfg_wr_code_rate     : code_rate_t;
-  signal cfg_wr_cnt           : cfg_t;
+  signal cfg_wr_constellation      : constellation_t;
+  signal cfg_wr_frame_type         : frame_type_t;
+  signal cfg_wr_code_rate          : code_rate_t;
+  signal cfg_wr_cnt                : cfg_t;
+  signal cfg_wr_en                 : std_logic;
   -- Write side counters
-  signal wr_row_cnt           : unsigned(numbits(MAX_ROWS) - 1 downto 0);
-  signal wr_column_cnt        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal wr_column_cnt_reg0   : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal wr_column_cnt_reg1   : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal wr_remainder         : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
-  signal wr_partial           : std_logic;
-  signal wr_partial_start     : integer range 0 to DATA_WIDTH - 1;
+  signal wr_row_cnt                : unsigned(numbits(MAX_ROWS) - 1 downto 0);
+  signal wr_column_cnt             : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
+  signal wr_column_cnt_reg0        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
+  signal wr_column_cnt_reg1        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
+  signal wr_remainder              : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
+  signal wr_partial                : std_logic;
+  signal wr_partial_start          : integer range 0 to DATA_WIDTH - 1;
 
-  signal wr_data_shifted      : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal wr_data_mux               : data_array_t(DATA_WIDTH - 1 downto 0);
+  signal last_word_mux             : data_array_t(DATA_WIDTH - 1 downto 0);
 
-  signal wr_addr_init         : std_logic := '0';
+  signal wr_addr_init              : std_logic := '0';
 
   -- RAM write interface
-  signal ram_wr_addr          : addr_array_t(MAX_COLUMNS - 1 downto 0);
-  signal ram_wr_data          : data_array_t(MAX_COLUMNS - 1 downto 0);
-  signal ram_wr_en            : std_logic_vector(MAX_COLUMNS - 1 downto 0);
+  signal ram_wr_addr               : addr_array_t(MAX_COLUMNS - 1 downto 0);
+  signal ram_wr_data               : data_array_t(MAX_COLUMNS - 1 downto 0);
+  signal ram_wr_en                 : std_logic_vector(MAX_COLUMNS - 1 downto 0);
 
   -- Read side config
-  signal fifo_rd_constellation : constellation_t;
-  signal fifo_rd_frame_type    : frame_type_t;
-  signal fifo_rd_code_rate     : code_rate_t;
+  signal cfg_fifo_rd_constellation : constellation_t;
+  signal cfg_fifo_rd_frame_rate    : frame_type_t;
+  signal cfg_fifo_rd_code_rate     : code_rate_t;
+  signal cfg_fifo_rd_en            : std_logic;
 
-  signal cfg_rd_constellation : constellation_t;
-  signal cfg_rd_frame_type    : frame_type_t;
-  signal cfg_rd_code_rate     : code_rate_t;
+  signal cfg_rd_constellation      : constellation_t;
+  signal cfg_rd_frame_type         : frame_type_t;
+  signal cfg_rd_code_rate          : code_rate_t;
 
-  signal cfg_rd_cnt           : cfg_t;
-  signal rd_row_cnt           : unsigned(numbits(MAX_ROWS) - 1 downto 0);
+  signal cfg_rd_cnt                : cfg_t;
+  signal rd_row_cnt                : unsigned(numbits(MAX_ROWS) - 1 downto 0);
 
-  signal rd_column_cnt        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal rd_column_cnt_reg    : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
+  signal rd_column_cnt             : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
+  signal rd_column_cnt_reg         : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
 
   -- RAM read interface
-  signal ram_rd_addr          : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-  signal ram_rd_data          : data_array_t(0 to MAX_COLUMNS - 1);
+  signal ram_rd_addr               : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
+  signal ram_rd_data               : data_array_t(0 to MAX_COLUMNS - 1);
 
-  signal rd_data_sr           : std_logic_vector(MAX_COLUMNS*DATA_WIDTH - 1 downto 0);
+  signal rd_data_sr                : std_logic_vector(MAX_COLUMNS*DATA_WIDTH - 1 downto 0);
 
-  signal interleaved_3c_012   : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
-  signal interleaved_3c_210   : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_0123  : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_3210  : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_3201  : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_5c       : std_logic_vector(5*DATA_WIDTH - 1 downto 0);
+  signal interleaved_3c_012        : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
+  signal interleaved_3c_210        : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_0123       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_3210       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_3201       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
+  signal interleaved_5c            : std_logic_vector(5*DATA_WIDTH - 1 downto 0);
 
-  signal m_wr_en              : std_logic := '0';
-  signal m_wr_en_reg          : std_logic := '0';
-  signal m_wr_full            : std_logic;
-  signal m_wr_data            : std_logic_vector(DATA_WIDTH - 1 downto 0);
-  signal m_wr_last            : std_logic := '0';
-  signal m_wr_last_reg        : std_logic := '0';
+  signal m_wr_en                   : std_logic := '0';
+  signal m_wr_en_reg               : std_logic := '0';
+  signal m_wr_full                 : std_logic;
+  signal m_wr_data                 : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal m_wr_last                 : std_logic := '0';
+  signal m_wr_last_reg             : std_logic := '0';
 
-  signal wr_first_word        : std_logic; -- To sample config
-  signal rd_first_word        : std_logic; -- To sample config
+  signal wr_first_word             : std_logic; -- To sample config
+  signal rd_first_word             : std_logic; -- To sample config
 
 begin
 
@@ -211,83 +214,58 @@ begin
       m_tdata  => m_tdata,
       m_tlast  => m_tlast);
 
-  -- Write and read side mmight be on different timings, use a small FIFO to pass config
+  -- First word samples config, whenever it's deasserted we can write the config
+  wr_en_gen: entity work.edge_detector
+    generic map (
+      SYNCHRONIZE_INPUT => False,
+      OUTPUT_DELAY      => 0)
+    port map (
+      -- Usual ports
+      clk     => clk,
+      clken   => '1',
+      --
+      din     => wr_first_word,
+      -- Edges detected
+      rising  => open,
+      falling => cfg_wr_en,
+      toggle  => open);
+
+  rd_en_gen: entity work.edge_detector
+    generic map (
+      SYNCHRONIZE_INPUT => False,
+      OUTPUT_DELAY      => 0)
+    port map (
+      -- Usual ports
+      clk     => clk,
+      clken   => '1',
+      --
+      din     => rd_first_word,
+      -- Edges detected
+      rising  => open,
+      falling => cfg_fifo_rd_en,
+      toggle  => open);
+
+  -- Write and read side might be on different timings, use a small FIFO to pass config
   -- across
-  cfg_fifo_block : block
+  cfg_fifo_u: entity work.config_fifo
+    generic map ( FIFO_DEPTH => 2 )
+    port map (
+      -- Usual ports
+      clk     => clk,
+      rst     => rst,
 
-    signal wr_cfg_wr_en : std_logic;
+      -- Write side
+      wr_en           => cfg_wr_en,
+      full            => open,
+      constellation_i => cfg_wr_constellation,
+      frame_type_i    => cfg_wr_frame_type,
+      code_rate_i     => cfg_wr_code_rate,
 
-    signal wr_full : std_logic;
-    signal wr_data : std_logic_vector(FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH + CODE_RATE_WIDTH - 1 downto 0);
-    signal rd_en   : std_logic;
-    signal rd_data : std_logic_vector(FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH + CODE_RATE_WIDTH - 1 downto 0);
-  begin
-
-    -- Squeeze config in
-    wr_data <= encode(cfg_wr_code_rate) &
-               encode(cfg_wr_constellation) &
-               encode(cfg_wr_frame_type);
-
-    -- Then extract it back
-    fifo_rd_code_rate     <= decode(rd_data(rd_data'length - 1 downto FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH));
-    fifo_rd_constellation <= decode(rd_data(FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH - 1 downto FRAME_TYPE_WIDTH));
-    fifo_rd_frame_type    <= decode(rd_data(FRAME_TYPE_WIDTH - 1 downto 0));
-
-    -- First word samples config, whenever it's deasserted we can write the config
-    wr_en_gen: entity work.edge_detector
-      generic map (
-        SYNCHRONIZE_INPUT => False,
-        OUTPUT_DELAY      => 0)
-      port map (
-        -- Usual ports
-        clk     => clk,
-        clken   => '1',
-        --
-        din     => wr_first_word,
-        -- Edges detected
-        rising  => open,
-        falling => wr_cfg_wr_en,
-        toggle  => open);
-
-    rd_en_gen: entity work.edge_detector
-      generic map (
-        SYNCHRONIZE_INPUT => False,
-        OUTPUT_DELAY      => 0)
-      port map (
-        -- Usual ports
-        clk     => clk,
-        clken   => '1',
-        --
-        din     => rd_first_word,
-        -- Edges detected
-        rising  => open,
-        falling => rd_en,
-        toggle  => open);
-
-    -- Very small FIFO for the config just to detach the write and read sides
-    cfg_fifo_u: entity work.axi_stream_fifo
-      generic map (
-        FIFO_DEPTH          => 2,
-        DATA_WIDTH          => FRAME_TYPE_WIDTH + CONSTELLATION_WIDTH + CODE_RATE_WIDTH,
-        RAM_INFERENCE_STYLE => "distributed")
-      port map (
-        -- Usual ports
-        clk     => clk,
-        rst     => rst,
-
-        -- Write side
-        s_tvalid => wr_cfg_wr_en,
-        s_tready => open,
-        s_tdata  => wr_data,
-        s_tlast  => '0',
-
-        -- Read side
-        m_tvalid => open,
-        m_tready => rd_en,
-        m_tdata  => rd_data,
-        m_tlast  => open);
-
-  end block;
+      rd_en           => cfg_fifo_rd_en,
+      empty           => open,
+      constellation_o => cfg_fifo_rd_constellation,
+      frame_type_o    => cfg_fifo_rd_frame_rate,
+      code_rate_o     => cfg_fifo_rd_code_rate);
 
   ------------------------------
   -- Asynchronous assignments --
@@ -330,12 +308,17 @@ begin
 
   s_tready_i      <= '1' when ram_ptr_diff < 2 else '0';
 
-  wr_data_shifted <= s_tdata_reg when wr_remainder = 0 else
-                     s_tdata_reg(DATA_WIDTH - to_integer(wr_remainder) - 1 downto 0) &
-                     s_tdata(DATA_WIDTH - 1 downto DATA_WIDTH - to_integer(wr_remainder));
-
   -- Assign internals
   s_tready        <= s_tready_i;
+
+  -- Unwrap muxes explicitly, Vivado doesn't seem to understand if we do this on the fly
+  g_mux_inputs : for i in 0 to DATA_WIDTH - 1 generate
+    wr_data_mux(i) <= s_tdata_reg(DATA_WIDTH - i - 1 downto 0) &
+                      s_tdata(DATA_WIDTH - 1 downto DATA_WIDTH - i);
+
+    last_word_mux(i) <= s_tdata_reg(i - 1 downto 0) &
+                        (DATA_WIDTH - i - 1 downto 0 => '0');
+  end generate;
 
   --------------------------------
   -- Handle write side pointers --
@@ -411,7 +394,7 @@ begin
       wr_partial_start   <= to_integer(wr_remainder);
 
       ram_wr_en                    <= (others => '0');
-      ram_wr_data(wr_column_cnt_i) <= wr_data_shifted;
+      ram_wr_data(wr_column_cnt_i) <= wr_data_mux(to_integer(wr_remainder));
 
       -- Increment RAM addr every time it gets written
       for column in 0 to MAX_COLUMNS - 1 loop
@@ -470,9 +453,7 @@ begin
             wr_partial    <= '1';
           else
             if cfg_wr_cnt.remainder /= 0 then
-              ram_wr_data(to_integer(wr_column_cnt_reg0)) <=
-                s_tdata_reg(to_integer(cfg_wr_cnt.remainder) - 1 downto 0)
-                & (DATA_WIDTH - to_integer(cfg_wr_cnt.remainder) - 1 downto 0 => '0');
+              ram_wr_data(to_integer(wr_column_cnt_reg0)) <= last_word_mux(to_integer(cfg_wr_cnt.remainder));
             end if;
 
             wr_column_cnt <= (others => '0');
@@ -486,14 +467,7 @@ begin
       -- Handle writing partial word
       if wr_partial = '1' then
         ram_wr_en(to_integer(wr_column_cnt_reg0))   <= '1';
-
-        ram_wr_data(to_integer(wr_column_cnt_reg0)) <=
-          s_tdata_reg(
-            DATA_WIDTH - wr_partial_start - 1
-            downto
-            DATA_WIDTH - wr_partial_start - to_integer(cfg_wr_cnt.remainder))
-          & (DATA_WIDTH - to_integer(cfg_wr_cnt.remainder) - 1 downto 0 => '0');
-
+        ram_wr_data(to_integer(wr_column_cnt_reg0)) <= wr_data_mux(wr_partial_start);
       end if;
 
     end if;
@@ -579,12 +553,12 @@ begin
       m_wr_last_reg     <= m_wr_last;
 
       if rd_first_word = '1' then
-        cfg_rd_cnt <= get_rd_cnt_max_values(fifo_rd_constellation, fifo_rd_frame_type);
+        cfg_rd_cnt <= get_rd_cnt_max_values(cfg_fifo_rd_constellation, cfg_fifo_rd_frame_rate);
 
         -- Sample data form the config FIFO whenever we read from it
-        cfg_rd_constellation <= fifo_rd_constellation;
-        cfg_rd_frame_type    <= fifo_rd_frame_type;
-        cfg_rd_code_rate     <= fifo_rd_code_rate;
+        cfg_rd_constellation <= cfg_fifo_rd_constellation;
+        cfg_rd_frame_type    <= cfg_fifo_rd_frame_rate;
+        cfg_rd_code_rate     <= cfg_fifo_rd_code_rate;
 
       end if;
 
