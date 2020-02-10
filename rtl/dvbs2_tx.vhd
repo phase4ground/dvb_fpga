@@ -104,9 +104,7 @@ begin
       m_tdata  => tdata(1));
 
   bch_encoder_cfg_fifo_u : entity work.config_fifo
-    generic map (
-      FIFO_DEPTH          => 4,
-      RAM_INFERENCE_STYLE => "distributed")
+    generic map ( FIFO_DEPTH => 4 )
     port map (
       -- Usual ports
       clk             => clk,
@@ -149,9 +147,7 @@ begin
       m_tdata        => tdata(2));
 
   bit_interleaver_config_fifo_u : entity work.config_fifo
-    generic map (
-      FIFO_DEPTH          => 4,
-      RAM_INFERENCE_STYLE => "distributed")
+    generic map ( FIFO_DEPTH => 4 )
     port map (
       -- Usual ports
       clk             => clk,
