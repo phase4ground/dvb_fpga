@@ -1,6 +1,6 @@
 ---
 
-name: CI
+name: CI - unit tests
 
 on: [ push, pull_request ]
 
@@ -8,7 +8,7 @@ env:
   PY_COLORS: 1
 
 jobs:
-  build:
+  unit_tests:
 
     runs-on: ubuntu-latest
 

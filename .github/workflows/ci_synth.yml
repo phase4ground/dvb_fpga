@@ -1,0 +1,21 @@
+---
+
+name: CI - Yosys
+
+on: [ push, pull_request ]
+
+env:
+  PY_COLORS: 1
+
+jobs:
+  yosys_synth:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - name: Yosys Run
+        run: |
+          git submodule update --init --recursive
+          docker pull ghdl/synth:beta
+          docker/run_synth.sh

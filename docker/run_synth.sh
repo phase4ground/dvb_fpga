@@ -42,40 +42,7 @@ adduser --disabled-password \
 # Run test with GHDL
 su -l $USER -c \"                          \
   cd /project                           && \
-  yosys -m ghdl -p '                       \
-    ghdl                                   \
-      rtl/bch_generated/bch_128x64.vhd     \
-      rtl/bch_generated/bch_192x64.vhd     \
-      rtl/bch_generated/bch_128x32.vhd     \
-      rtl/bch_generated/bch_160x16.vhd     \
-      rtl/bch_generated/bch_128x16.vhd     \
-      rtl/bch_generated/bch_168x8.vhd      \
-      rtl/bch_generated/bch_192x32.vhd     \
-      rtl/bch_generated/bch_192x8.vhd      \
-      rtl/bch_generated/bch_128x8.vhd      \
-      rtl/bch_generated/bch_160x32.vhd     \
-      rtl/bch_generated/bch_160x64.vhd     \
-      rtl/bch_generated/bch_192x16.vhd     \
-      rtl/bch_generated/bch_168x8.vhd      \
-      rtl/bch_generated/bch_160x8.vhd      \
-      rtl/common_pkg.vhd                   \
-      rtl/dvb_utils_pkg.vhd                \
-      rtl/axi_stream_delay.vhd             \
-      rtl/skidbuffer.vhd                   \
-      rtl/synchronizer.vhd                 \
-      rtl/sr_delay.vhd                     \
-      rtl/edge_detector.vhd                \
-      rtl/ram_inference.vhd                \
-      rtl/axi_stream_fifo.vhd              \
-      rtl/bch_encoder_mux.vhd              \
-      rtl/axi_baseband_scrambler.vhd       \
-      rtl/axi_stream_master_adapter.vhd    \
-      rtl/axi_bch_encoder.vhd              \
-      rtl/config_fifo.vhd                  \
-      rtl/axi_bit_interleaver.vhd          \
-      rtl/dvbs2_tx.vhd                     \
-      -e dvbs2_tx'
-  \"
+  yosys -m ghdl dvbs2_tx.ys\"
 "
 
 # Need to add some variables so that uploading coverage from witihin the
