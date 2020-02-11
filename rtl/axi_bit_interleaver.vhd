@@ -160,6 +160,14 @@ begin
   -------------------
   -- Generate 1 RAM for each column, each one gets written sequentially
   generate_rams : for column in 0 to MAX_COLUMNS - 1 generate
+    -- Needed got GHDL simulation to work
+    signal addr_a : std_logic_vector(numbits(MAX_ROWS) downto 0);
+    signal addr_b : std_logic_vector(numbits(MAX_ROWS) downto 0);
+  begin
+
+    addr_a <= std_logic_vector(ram_wr_addr(column)(numbits(MAX_ROWS) downto 0));
+    addr_b <= std_logic_vector(ram_rd_addr(numbits(MAX_ROWS) downto 0));
+
     ram : entity work.ram_inference
       generic map (
         ADDR_WIDTH          => numbits(MAX_ROWS) + 1,
@@ -171,14 +179,14 @@ begin
         clk_a     => clk,
         clken_a   => '1',
         wren_a    => ram_wr_en(column),
-        addr_a    => std_logic_vector(ram_wr_addr(column)(numbits(MAX_ROWS) downto 0)),
+        addr_a    => addr_a,
         wrdata_a  => ram_wr_data(column),
         rddata_a  => open,
 
         -- Port B
         clk_b     => clk,
         clken_b   => '1',
-        addr_b    => std_logic_vector(ram_rd_addr(numbits(MAX_ROWS) downto 0)),
+        addr_b    => addr_b,
         rddata_b  => ram_rd_data(column));
   end generate generate_rams;
 
@@ -600,10 +608,8 @@ begin
             end if;
 
           elsif cfg_rd_constellation = mod_16apsk then
-            -- TODO: DVB-S2 doesn't specify a different interleaving sequence for code
-            -- rate 3/5 and 16 APSK, only 8 PSK. Check if the DVB-S2 extensions spec
-            -- mentions anything. Leave like this for now as this agrees with GNU Radio's
-            -- result
+            -- DVB-S2 doesn't specify a different interleaving sequence for code rate 3/5
+            -- and 16 APSK, only 8 PSK but DVB-S2(X) does
             if cfg_rd_code_rate = C3_5 then
               if cfg_rd_frame_type = fecframe_normal then
                 rd_data_sr(interleaved_4c_3210'range) <= mirror_bits(interleaved_4c_3210);
