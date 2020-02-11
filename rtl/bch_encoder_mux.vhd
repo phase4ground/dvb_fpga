@@ -67,19 +67,25 @@ architecture bch_encoder_mux of bch_encoder_mux is
   function to_index (
     constant frame_type : in  frame_type_t;
     constant code_rate  : in  code_rate_t) return natural is
-    constant crc_length : positive := get_crc_length(frame_type, code_rate);
   begin
-    if crc_length = 128 then
-      return CRC_128_INDEX;
-    elsif crc_length = 160 then
-      return CRC_160_INDEX;
-    elsif crc_length = 168 then
+    if frame_type = fecframe_short then
       return CRC_168_INDEX;
-    elsif crc_length = 192 then
-      return CRC_192_INDEX;
+    else
+      if code_rate = C8_9 or code_rate = C9_10 then
+        return CRC_128_INDEX;
+      elsif code_rate = C5_6 or code_rate = C2_3 then
+        return CRC_160_INDEX;
+      else
+        return CRC_192_INDEX;
+      end if;
     end if;
-  end function to_index;
 
+    report "Unable to determine CRC length for " &
+           "frame length = " & frame_type_t'image(frame_type) & ", " &
+           "code rate = " & code_rate_t'image(code_rate)
+    severity Failure;
+    return 0;
+  end;
 
   -----------
   -- Types --

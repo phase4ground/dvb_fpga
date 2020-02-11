@@ -159,39 +159,28 @@ begin
   -- Port mappings --
   -------------------
   -- Generate 1 RAM for each column, each one gets written sequentially
-  block_ram : block
-    -- Wiring directly was causing bound errors on GHDL
-    signal addr_b : std_logic_vector(numbits(MAX_ROWS) downto 0);
-  begin
+  generate_rams : for column in 0 to MAX_COLUMNS - 1 generate
+    ram : entity work.ram_inference
+      generic map (
+        ADDR_WIDTH          => numbits(MAX_ROWS) + 1,
+        DATA_WIDTH          => DATA_WIDTH,
+        RAM_INFERENCE_STYLE => "auto",
+        EXTRA_OUTPUT_DELAY  => 0)
+      port map (
+        -- Port A
+        clk_a     => clk,
+        clken_a   => '1',
+        wren_a    => ram_wr_en(column),
+        addr_a    => std_logic_vector(ram_wr_addr(column)(numbits(MAX_ROWS) downto 0)),
+        wrdata_a  => ram_wr_data(column),
+        rddata_a  => open,
 
-    generate_rams : for column in 0 to MAX_COLUMNS - 1 generate
-      signal addr_a : std_logic_vector(numbits(MAX_ROWS) downto 0);
-    begin
-      addr_a <= std_logic_vector(ram_wr_addr(column)(numbits(MAX_ROWS) downto 0));
-      addr_b <= std_logic_vector(ram_rd_addr(numbits(MAX_ROWS) downto 0));
-
-      ram : entity work.ram_inference
-        generic map (
-          ADDR_WIDTH          => numbits(MAX_ROWS) + 1,
-          DATA_WIDTH          => DATA_WIDTH,
-          RAM_INFERENCE_STYLE => "auto",
-          EXTRA_OUTPUT_DELAY  => 0)
-        port map (
-          -- Port A
-          clk_a     => clk,
-          clken_a   => '1',
-          wren_a    => ram_wr_en(column),
-          addr_a    => addr_a,
-          wrdata_a  => ram_wr_data(column),
-          rddata_a  => open,
-
-          -- Port B
-          clk_b     => clk,
-          clken_b   => '1',
-          addr_b    => addr_b,
-          rddata_b  => ram_rd_data(column));
-    end generate generate_rams;
-  end block;
+        -- Port B
+        clk_b     => clk,
+        clken_b   => '1',
+        addr_b    => std_logic_vector(ram_rd_addr(numbits(MAX_ROWS) downto 0)),
+        rddata_b  => ram_rd_data(column));
+  end generate generate_rams;
 
   -- Interleaved data takes 1 cycle after the address has changed, add support for
   -- a couple of cycles to stop the pipeline
@@ -274,7 +263,6 @@ begin
 
   -- Assign the interleaved data statically
   iter_rows : for row in 0 to DATA_WIDTH - 1 generate
-  begin
     iter_3_columns : for column in 0 to 2 generate
       interleaved_3c_012(3*DATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(column)(DATA_WIDTH - row - 1);
       interleaved_3c_210(3*DATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(2 - column)(DATA_WIDTH - row - 1);
@@ -442,7 +430,7 @@ begin
             -- cfg_wr_cnt.remainder) and we need to know whenever the *next* column will
             -- have a full extra word -- hence the 2 * cfg_wr_cnt.remainder here
             if wr_remainder - (cfg_wr_cnt.remainder & '0') = 0 then
-              wr_row_cnt <= (wr_row_cnt'range => '0') - 1;
+              wr_row_cnt <= (wr_row_cnt'range => '1');
             end if;
 
           end if;

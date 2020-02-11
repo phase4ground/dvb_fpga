@@ -125,7 +125,7 @@ package body dvb_utils_pkg is
     if not is_01(v) then
       return not_set;
     end if;
-    return frame_type_t'val(to_integer(unsigned(to_x01(v))));
+    return frame_type_t'val(to_integer(unsigned(v)));
   end;
 
   function decode( constant v : std_logic_vector ) return constellation_t is

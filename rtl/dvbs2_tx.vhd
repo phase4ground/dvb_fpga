@@ -207,10 +207,10 @@ begin
   tlast(0)         <= s_tlast;
   s_tready         <= tready(0);
 
-  m_tvalid         <= tvalid(3);
-  m_tdata          <= tdata(3);
-  m_tlast          <= tlast(3);
-  tready(3)        <= m_tready;
+  m_tvalid                 <= tvalid(CHAIN_LENGTH - 1);
+  m_tdata                  <= tdata(CHAIN_LENGTH - 1);
+  m_tlast                  <= tlast(CHAIN_LENGTH - 1);
+  tready(CHAIN_LENGTH - 1) <= m_tready;
 
   ---------------
   -- Processes --
