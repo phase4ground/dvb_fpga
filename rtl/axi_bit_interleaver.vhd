@@ -366,13 +366,16 @@ begin
     variable wr_column_cnt_i    : natural range 0 to MAX_COLUMNS - 1;
   begin
     if rst = '1' then
-      wr_column_cnt <= (others => '0');
-      wr_row_cnt    <= (others => '0');
-      wr_remainder  <= (others => '0');
-      wr_ram_ptr    <= (others => '0');
+      wr_column_cnt   <= (others => '0');
+      wr_row_cnt      <= (others => '0');
+      wr_remainder    <= (others => '0');
+      wr_ram_ptr      <= (others => '0');
 
-      wr_first_word <= '1';
-      wr_addr_init  <= '1';
+      wr_first_word   <= '1';
+      wr_addr_init    <= '1';
+      -- FIXME: Revisit this in the future; for some reason GHDL Synth and/or Yosys fail
+      -- if we don't add this (see https://github.com/ghdl/ghdl/issues/1136)
+      ram_wr_data     <= (others => (others => 'U'));
 
     elsif rising_edge(clk) then
 
