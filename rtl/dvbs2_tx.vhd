@@ -36,9 +36,9 @@ entity dvbs2_tx is
     clk               : in  std_logic;
     rst               : in  std_logic;
 
-    cfg_constellation : in  constellation_t;
-    cfg_frame_type    : in  frame_type_t;
-    cfg_code_rate     : in  code_rate_t;
+    cfg_constellation : in  std_logic_vector(CONSTELLATION_WIDTH - 1 downto 0);
+    cfg_frame_type    : in  std_logic_vector(FRAME_TYPE_WIDTH - 1 downto 0);
+    cfg_code_rate     : in  std_logic_vector(CODE_RATE_WIDTH - 1 downto 0);
 
     -- AXI input
     s_tvalid          : in  std_logic;
@@ -198,9 +198,9 @@ begin
     cfg_sample_en(i) <= axi_dv(i) and first_word(i);
   end generate;
 
-  constellation(0) <= cfg_constellation;
-  frame_type(0)    <= cfg_frame_type;
-  code_rate(0)     <= cfg_code_rate;
+  constellation(0) <= decode(cfg_constellation);
+  frame_type(0)    <= decode(cfg_frame_type);
+  code_rate(0)     <= decode(cfg_code_rate);
 
   tvalid(0)        <= s_tvalid;
   tdata(0)         <= s_tdata;

@@ -121,9 +121,9 @@ begin
       clk               => clk,
       rst               => rst,
 
-      cfg_constellation => cfg_constellation,
-      cfg_frame_type    => cfg_frame_type,
-      cfg_code_rate     => cfg_code_rate,
+      cfg_constellation => encode(cfg_constellation),
+      cfg_frame_type    => encode(cfg_frame_type),
+      cfg_code_rate     => encode(cfg_code_rate),
 
       -- AXI input
       s_tvalid          => m_tvalid,
