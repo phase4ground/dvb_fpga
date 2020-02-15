@@ -42,7 +42,7 @@ adduser --disabled-password \
 # Run test with GHDL
 su -l $USER -c \"                          \
   cd /project                           && \
-  yosys -m ghdl dvbs2_tx.ys\"
+  yosys -m ghdl dvbs2_tx.ys $*\"
 "
 
 # Need to add some variables so that uploading coverage from witihin the
@@ -51,6 +51,7 @@ docker run                                                 \
   --rm                                                     \
   --mount type=bind,source="$PATH_TO_REPO",target=/project \
   --net=host                                               \
+  --env="TERM"                                             \
   --env="DISPLAY"                                          \
   --volume="$HOME/.Xauthority:/root/.Xauthority:rw"        \
   $CONTAINER /bin/bash -c "$RUN_COMMAND"
