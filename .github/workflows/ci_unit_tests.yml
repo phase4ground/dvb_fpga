@@ -1,6 +1,6 @@
 ---
 
-name: testing
+name: Unit tests
 
 on: [ push, pull_request ]
 
