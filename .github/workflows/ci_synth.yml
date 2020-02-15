@@ -1,6 +1,6 @@
 ---
 
-name: CI - Yosys
+name: Yosys Synth
 
 on: [ push, pull_request ]
 

@@ -1,6 +1,6 @@
 ---
 
-name: CI - unit tests
+name: testing
 
 on: [ push, pull_request ]
 
