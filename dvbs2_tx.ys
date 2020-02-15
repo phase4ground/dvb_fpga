@@ -46,7 +46,7 @@ techmap; opt
 # # mapping logic to mycells.lib
 # abc -liberty mycells.lib
 
-synth_xilinx
+synth_xilinx -flatten -edif dvbs2_tx.edif  -blif dvbs2_tx.blif
 
 # cleanup
 clean
