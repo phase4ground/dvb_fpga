@@ -153,7 +153,7 @@ class dvbs2_tx(gr.top_block):
         self.fft_filter_xxx_0.declare_sample_delay(0)
         self.dtv_dvbs2_physical_cc_0 = dtv.dvbs2_physical_cc(frame_type, code_rate, dtv.MOD_BPSK, dtv.PILOTS_ON, 0)
         self.dtv_dvbs2_modulator_bc_0 = dtv.dvbs2_modulator_bc(frame_type,
-        code_rate, dtv.MOD_BPSK, dtv.INTERPOLATION_OFF)
+        code_rate, constellation, dtv.INTERPOLATION_OFF)
         self.dtv_dvbs2_interleaver_bb_0 = dtv.dvbs2_interleaver_bb(frame_type, code_rate, constellation)
         self.dtv_dvb_ldpc_bb_0 = dtv.dvb_ldpc_bb(dtv.STANDARD_DVBS2, frame_type, code_rate, dtv.MOD_OTHER)
         self.dtv_dvb_bch_bb_0 = dtv.dvb_bch_bb(dtv.STANDARD_DVBS2, frame_type, code_rate)

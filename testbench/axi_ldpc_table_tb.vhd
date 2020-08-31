@@ -213,7 +213,6 @@ begin
   main : process -- {{
     constant self         : actor_t := new_actor("main");
     constant logger       : logger_t := get_logger("main");
-    constant input_cfg_p  : actor_t := find("input_cfg_p");
     variable file_checker : file_reader_t := new_file_reader(FILE_CHECKER_NAME);
     variable ldpc_table   : file_reader_t := new_file_reader("ldpc_table_u");
 
@@ -334,7 +333,6 @@ begin
       end if;
 
       wait_for_completion;
-      check_false(has_message(input_cfg_p));
       check_equal(error_cnt, 0);
 
       walk(32);

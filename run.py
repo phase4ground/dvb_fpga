@@ -31,57 +31,19 @@ import struct
 import subprocess as subp
 import sys
 import time
-from enum import Enum
 from multiprocessing import Pool
 from typing import NamedTuple
 
 from vunit import VUnit, VUnitCLI  # type: ignore
 
-_logger = logging.getLogger(__name__)
-
 ROOT = p.abspath(p.dirname(__file__))
 
+sys.path.insert(0, p.join(ROOT, "misc"))
 
-class ConstellationType(Enum):
-    """
-    Constellation types as defined in the DVB-S2 spec. Enum names should match
-    the C/C++ defines, values are a nice string representation for the test
-    names.
-    """
-
-    MOD_8PSK = "8PSK"
-    MOD_16APSK = "16APSK"
-    MOD_32APSK = "32APSK"
+from dvb_common import CodeRate, ConstellationType, FrameLength  # type: ignore
 
 
-class FrameLength(Enum):
-    """
-    Frame types as defined in the DVB-S2 spec. Enum names should match
-    the C/C++ defines, values are a nice string representation for the test
-    names.
-    """
-
-    FECFRAME_NORMAL = "normal"
-    FECFRAME_SHORT = "short"
-
-
-class CodeRate(Enum):
-    """
-    Code rates as defined in the DVB-S2 spec. Enum names should match the C/C++
-    defines, values are a nice string representation for the test names.
-    """
-
-    C1_4 = "1/4"
-    C1_3 = "1/3"
-    C2_5 = "2/5"
-    C1_2 = "1/2"
-    C3_5 = "3/5"
-    C2_3 = "2/3"
-    C3_4 = "3/4"
-    C4_5 = "4/5"
-    C5_6 = "5/6"
-    C8_9 = "8/9"
-    C9_10 = "9/10"
+_logger = logging.getLogger(__name__)
 
 
 class TestDefinition(
@@ -466,7 +428,7 @@ def main():
     )
 
     # Generate bit interleaver tests
-    for data_width in (8, ):
+    for data_width in (8,):
         all_configs = []
         for config in _getConfigs():
             all_configs += [config.getTestConfigString()]
@@ -490,6 +452,29 @@ def main():
                     NUMBER_OF_TEST_FRAMES=2,
                 ),
             )
+
+    # Gerate constellation mapper tests
+    for data_width in (32, 64):
+        all_configs = []
+        for config in _getConfigs():
+            all_configs += [config.getTestConfigString()]
+            vunit.library("lib").entity("constellation_mapper_tb").add_config(
+                name=f"data_width={data_width},{config.name}",
+                generics=dict(
+                    DATA_WIDTH=data_width,
+                    test_cfg=config.getTestConfigString(),
+                    NUMBER_OF_TEST_FRAMES=2,
+                ),
+            )
+
+        vunit.library("lib").entity("constellation_mapper_tb").add_config(
+            name=f"data_width={data_width},all_parameters",
+            generics=dict(
+                DATA_WIDTH=data_width,
+                test_cfg="|".join(all_configs),
+                NUMBER_OF_TEST_FRAMES=2,
+            ),
+        )
 
     vunit.set_compile_option("modelsim.vcom_flags", ["-explicit"])
 
