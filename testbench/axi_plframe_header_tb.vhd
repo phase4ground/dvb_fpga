@@ -234,6 +234,8 @@ begin
         read_file(net, file_reader, data_path & "/plframe_header_pilots_off_fixed_point.bin");
       end loop;
 
+      join(net, dut);
+
     end procedure run_test; -- }} --------------------------------------------------------
 
   begin

@@ -29,10 +29,8 @@ use ieee.math_real.MATH_PI;
 
 library fpga_cores;
 use fpga_cores.common_pkg.all;
-use fpga_cores.axi_pkg.all;
 
 use work.dvb_utils_pkg.all;
-use work.ldpc_pkg.all;
 use work.plframe_header_pkg.all;
 
 -- Creates PLFRAME headers from a set of config parameters. Please note pilots ARE NOT
@@ -74,37 +72,18 @@ end axi_plframe_header;
 
 architecture axi_plframe_header of axi_plframe_header is
 
-  ----------------
-  -- Suprograms --
-  ----------------
-  function to_fixed_point (constant x : real) return signed is
-  constant width : integer := DATA_WIDTH/2;
-  begin
-    return to_signed(integer(ieee.math_real.round(x * real(2**(width - 1)))), width);
-  end;
-
-  function cos (constant x : real) return signed is
-  begin
-    return to_fixed_point(ieee.math_real.cos(x));
-  end;
-
-  function sin (constant x : real) return signed is
-  begin
-    return to_fixed_point(ieee.math_real.sin(x));
-  end;
-
   ---------------
   -- Constants --
   ---------------
   constant MOD_8PSK_MAP : std_logic_array_t(0 to 7)(DATA_WIDTH - 1 downto 0) := (
-    0 => std_logic_vector(cos(      MATH_PI / 4.0) & sin(      MATH_PI / 4.0)),
-    1 => std_logic_vector(cos(5.0 * MATH_PI / 4.0) & sin(5.0 * MATH_PI / 4.0)),
-    2 => std_logic_vector(cos(5.0 * MATH_PI / 4.0) & sin(      MATH_PI / 4.0)),
-    3 => std_logic_vector(cos(      MATH_PI / 4.0) & sin(5.0 * MATH_PI / 4.0)),
-    4 => std_logic_vector(cos(5.0 * MATH_PI / 4.0) & sin(      MATH_PI / 4.0)),
-    5 => std_logic_vector(cos(      MATH_PI / 4.0) & sin(5.0 * MATH_PI / 4.0)),
-    6 => std_logic_vector(cos(5.0 * MATH_PI / 4.0) & sin(5.0 * MATH_PI / 4.0)),
-    7 => std_logic_vector(cos(      MATH_PI / 4.0) & sin(      MATH_PI / 4.0))
+    0 => std_logic_vector(cos(      MATH_PI / 4.0, DATA_WIDTH/2) & sin(      MATH_PI / 4.0, DATA_WIDTH/2)),
+    1 => std_logic_vector(cos(5.0 * MATH_PI / 4.0, DATA_WIDTH/2) & sin(5.0 * MATH_PI / 4.0, DATA_WIDTH/2)),
+    2 => std_logic_vector(cos(5.0 * MATH_PI / 4.0, DATA_WIDTH/2) & sin(      MATH_PI / 4.0, DATA_WIDTH/2)),
+    3 => std_logic_vector(cos(      MATH_PI / 4.0, DATA_WIDTH/2) & sin(5.0 * MATH_PI / 4.0, DATA_WIDTH/2)),
+    4 => std_logic_vector(cos(5.0 * MATH_PI / 4.0, DATA_WIDTH/2) & sin(      MATH_PI / 4.0, DATA_WIDTH/2)),
+    5 => std_logic_vector(cos(      MATH_PI / 4.0, DATA_WIDTH/2) & sin(5.0 * MATH_PI / 4.0, DATA_WIDTH/2)),
+    6 => std_logic_vector(cos(5.0 * MATH_PI / 4.0, DATA_WIDTH/2) & sin(5.0 * MATH_PI / 4.0, DATA_WIDTH/2)),
+    7 => std_logic_vector(cos(      MATH_PI / 4.0, DATA_WIDTH/2) & sin(      MATH_PI / 4.0, DATA_WIDTH/2))
   );
 
   constant SOF           : std_logic_vector(25 downto 0) := "01" & x"8D2E82";

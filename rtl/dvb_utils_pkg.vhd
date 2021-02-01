@@ -68,6 +68,10 @@ package dvb_utils_pkg is
     constant frame_type : in  frame_type_t;
     constant code_rate  : in  code_rate_t) return positive;
 
+  function to_fixed_point (constant x : real; constant width : positive) return signed;
+  function cos (constant x : real; constant width : positive) return signed;
+  function sin (constant x : real; constant width : positive) return signed;
+
 end dvb_utils_pkg;
 
 package body dvb_utils_pkg is
@@ -164,6 +168,21 @@ package body dvb_utils_pkg is
       return not_set;
     end if;
     return code_rate_t'val(to_integer(unsigned(v)));
+  end;
+
+  function to_fixed_point (constant x : real; constant width : positive) return signed is
+  begin
+    return to_signed(integer(ieee.math_real.round(x * real(2**(width - 1)))), width);
+  end;
+
+  function cos (constant x : real; constant width : positive) return signed is
+  begin
+    return to_fixed_point(ieee.math_real.cos(x), width);
+  end;
+
+  function sin (constant x : real; constant width : positive) return signed is
+  begin
+    return to_fixed_point(ieee.math_real.sin(x), width);
   end;
 
 end package body;
