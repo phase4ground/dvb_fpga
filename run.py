@@ -496,6 +496,12 @@ def setupTests(vunit, args):
                     test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=2,
                 ),
             )
+            vunit.library("lib").entity("axi_constellation_mapper_tb").add_config(
+                name=config.name,
+                generics=dict(
+                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=1,
+                ),
+            )
 
     else:
         addAllConfigsTest(
@@ -573,7 +579,6 @@ def setupTests(vunit, args):
                     NUMBER_OF_TEST_FRAMES=2,
                 ),
             )
-
 
 def addAllConfigsTest(entity, configs):
     """
