@@ -28,7 +28,6 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use ieee.math_real.MATH_PI;
 
 library fpga_cores;
 use fpga_cores.common_pkg.all;
@@ -36,25 +35,26 @@ use fpga_cores.axi_pkg.all;
 
 use work.dvb_utils_pkg.all;
 
-library str_format;
-use str_format.str_format_pkg.all;
-
-library vunit_lib;
-context vunit_lib.vunit_context;
-context vunit_lib.com_context;
-
 ------------------------
 -- Entity declaration --
 ------------------------
 entity axi_constellation_mapper is
   generic (
-    DATA_WIDTH : integer := 8
+    INPUT_DATA_WIDTH  : integer := 8;
+    OUTPUT_DATA_WIDTH : integer := 32
   );
   port (
     -- Usual ports
     clk               : in  std_logic;
     rst               : in  std_logic;
-    -- Parameter input
+
+    -- Mapping RAM config
+    ram_wren          : in  std_logic;
+    ram_addr          : in  std_logic_vector(5 downto 0);
+    ram_wdata         : in  std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+    ram_rdata         : out std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+
+    -- Config input
     cfg_constellation : in  constellation_t;
     cfg_frame_type    : in  frame_type_t;
     cfg_code_rate     : in  code_rate_t;
@@ -63,65 +63,49 @@ entity axi_constellation_mapper is
     s_tready          : out std_logic;
     s_tvalid          : in  std_logic;
     s_tlast           : in  std_logic;
-    s_tdata           : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
+    s_tdata           : in  std_logic_vector(INPUT_DATA_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready          : in  std_logic;
     m_tvalid          : out std_logic;
     m_tlast           : out std_logic;
-    m_tdata           : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    m_tdata           : out std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0));
 end axi_constellation_mapper;
 
 architecture axi_constellation_mapper of axi_constellation_mapper is
 
-  function get_iq_pair ( constant x : real ) return signed is
-  begin
-    return cos(x, DATA_WIDTH / 2) & sin(x, DATA_WIDTH / 2);
-  end function;
-
-  -----------
-  -- Types --
-  -----------
-  -- This ROM stores values for qpsk, 8 psk, 16 apsk and 32 apsk (in this order)
-  constant CONSTELLATION_ROM : std_logic_array_t(0 to 59)(DATA_WIDTH - 1 downto 0) := (
-    -- QPSK
-    0 => std_logic_vector(get_iq_pair(      MATH_PI / 4.0)),
-    1 => std_logic_vector(get_iq_pair(7.0 * MATH_PI / 4.0)),
-    2 => std_logic_vector(get_iq_pair(3.0 * MATH_PI / 4.0)),
-    3 => std_logic_vector(get_iq_pair(5.0 * MATH_PI / 4.0)),
-
-    -- 8PSK
-    4  => std_logic_vector(get_iq_pair(     MATH_PI / 4.0)),
-    5  => std_logic_vector(get_iq_pair(0.0)),
-    6  => std_logic_vector(get_iq_pair(4.0 * MATH_PI / 4.0)),
-    7  => std_logic_vector(get_iq_pair(5.0 * MATH_PI / 4.0)),
-    8  => std_logic_vector(get_iq_pair(2.0 * MATH_PI / 4.0)),
-    9  => std_logic_vector(get_iq_pair(7.0 * MATH_PI / 4.0)),
-    10 => std_logic_vector(get_iq_pair(3.0 * MATH_PI / 4.0)),
-    11 => std_logic_vector(get_iq_pair(6.0 * MATH_PI / 4.0)),
-    -- 16 APSK
-    others => (others => '0'));
+  constant CONFIG_INPUT_WIDTHS: fpga_cores.common_pkg.integer_vector_t := (
+    0 => FRAME_TYPE_WIDTH,
+    1 => CONSTELLATION_WIDTH,
+    2 => CODE_RATE_WIDTH);
 
   -------------
   -- Signals --
   -------------
-  signal m_tvalid_i  : std_logic;
-  signal mux_sel     : std_logic_vector(3 downto 0);
-  signal conv_tready : std_logic_vector(3 downto 0);
-  signal conv_tvalid : std_logic_vector(3 downto 0);
+  signal m_tvalid_i           : std_logic;
+  signal m_tlast_i            : std_logic;
+  signal mux_sel              : std_logic_vector(3 downto 0);
+  signal conv_tready          : std_logic_vector(3 downto 0);
+  signal conv_tvalid          : std_logic_vector(3 downto 0);
 
-  signal axi_qpsk    : axi_stream_data_bus_t(tdata(1 downto 0));
-  signal axi_8psk    : axi_stream_data_bus_t(tdata(2 downto 0));
-  signal axi_16apsk  : axi_stream_data_bus_t(tdata(3 downto 0));
-  signal axi_32apsk  : axi_stream_data_bus_t(tdata(4 downto 0));
+  signal axi_qpsk             : axi_stream_bus_t(tdata(1 downto 0), tuser(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0));
+  signal axi_8psk             : axi_stream_bus_t(tdata(2 downto 0), tuser(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0));
+  signal axi_16apsk           : axi_stream_bus_t(tdata(3 downto 0), tuser(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0));
+  signal axi_32apsk           : axi_stream_bus_t(tdata(4 downto 0), tuser(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0));
 
-  signal addr_qpsk   : std_logic_vector(5 downto 0);
-  signal addr_8psk   : std_logic_vector(5 downto 0);
-  signal addr_16apsk : std_logic_vector(5 downto 0);
-  signal addr_32apsk : std_logic_vector(5 downto 0);
+  signal addr_qpsk            : std_logic_vector(5 downto 0);
+  signal addr_8psk            : std_logic_vector(5 downto 0);
+  signal addr_16apsk          : std_logic_vector(5 downto 0);
+  signal addr_32apsk          : std_logic_vector(5 downto 0);
 
-  signal rom_addr    : std_logic_vector(5 downto 0);
-  signal rom_data    : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal map_addr             : std_logic_vector(5 downto 0);
+  signal map_data             : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal map_cfg              : std_logic_vector(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0);
+
+  -- ROM side config, so won't need to wait until an entire frame goes through
+  signal egress_constellation : constellation_t;
+  signal egress_frame_type    : frame_type_t;
+  signal egress_code_rate     : code_rate_t;
 
 begin
 
@@ -146,112 +130,127 @@ begin
 
   width_converter_qpsk_u : entity fpga_cores.axi_stream_width_converter
   generic map (
-    INPUT_DATA_WIDTH  => DATA_WIDTH,
+    INPUT_DATA_WIDTH  => INPUT_DATA_WIDTH,
     OUTPUT_DATA_WIDTH => 2,
-    AXI_TID_WIDTH     => 0)
+    AXI_TID_WIDTH     => sum(CONFIG_INPUT_WIDTHS),
+    ENDIANNESS        => LEFT_FIRST)
   port map (
     -- Usual ports
     clk      => clk,
     rst      => rst,
     -- AXI stream input
     s_tready => conv_tready(0),
-    s_tdata  => mirror_bits(s_tdata),
+    s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => (others => 'U'),
+    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
     s_tvalid => conv_tvalid(0),
     s_tlast  => s_tlast,
     -- AXI stream output
     m_tready => axi_qpsk.tready,
     m_tdata  => axi_qpsk.tdata,
     m_tkeep  => open,
-    m_tid    => open,
+    m_tid    => axi_qpsk.tuser,
     m_tvalid => axi_qpsk.tvalid,
     m_tlast  => axi_qpsk.tlast);
 
   width_converter_8psk_u : entity fpga_cores.axi_stream_width_converter
   generic map (
-    INPUT_DATA_WIDTH  => DATA_WIDTH,
+    INPUT_DATA_WIDTH  => INPUT_DATA_WIDTH,
     OUTPUT_DATA_WIDTH => 3,
-    AXI_TID_WIDTH     => 0)
+    AXI_TID_WIDTH     => sum(CONFIG_INPUT_WIDTHS),
+    ENDIANNESS        => LEFT_FIRST)
   port map (
     -- Usual ports
     clk      => clk,
     rst      => rst,
     -- AXI stream input
     s_tready => conv_tready(1),
-    s_tdata  => mirror_bits(s_tdata),
+    s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => (others => 'U'),
+    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
     s_tvalid => conv_tvalid(1),
     s_tlast  => s_tlast,
     -- AXI stream output
     m_tready => axi_8psk.tready,
     m_tdata  => axi_8psk.tdata,
     m_tkeep  => open,
-    m_tid    => open,
+    m_tid    => axi_8psk.tuser,
     m_tvalid => axi_8psk.tvalid,
     m_tlast  => axi_8psk.tlast);
 
   width_converter_16apsk_u : entity fpga_cores.axi_stream_width_converter
   generic map (
-    INPUT_DATA_WIDTH  => DATA_WIDTH,
+    INPUT_DATA_WIDTH  => INPUT_DATA_WIDTH,
     OUTPUT_DATA_WIDTH => 4,
-    AXI_TID_WIDTH     => 0)
+    AXI_TID_WIDTH     => sum(CONFIG_INPUT_WIDTHS),
+    ENDIANNESS        => LEFT_FIRST)
   port map (
     -- Usual ports
     clk      => clk,
     rst      => rst,
     -- AXI stream input
     s_tready => conv_tready(2),
-    s_tdata  => mirror_bits(s_tdata),
+    s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => (others => 'U'),
+    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
     s_tvalid => conv_tvalid(2),
     s_tlast  => s_tlast,
     -- AXI stream output
     m_tready => axi_16apsk.tready,
     m_tdata  => axi_16apsk.tdata,
     m_tkeep  => open,
-    m_tid    => open,
+    m_tid    => axi_16apsk.tuser,
     m_tvalid => axi_16apsk.tvalid,
     m_tlast  => axi_16apsk.tlast);
 
   width_converter_32apsk_u : entity fpga_cores.axi_stream_width_converter
   generic map (
-    INPUT_DATA_WIDTH  => DATA_WIDTH,
+    INPUT_DATA_WIDTH  => INPUT_DATA_WIDTH,
     OUTPUT_DATA_WIDTH => 5,
-    AXI_TID_WIDTH     => 0)
+    AXI_TID_WIDTH     => sum(CONFIG_INPUT_WIDTHS),
+    ENDIANNESS        => LEFT_FIRST)
   port map (
     -- Usual ports
     clk      => clk,
     rst      => rst,
     -- AXI stream input
     s_tready => conv_tready(3),
-    s_tdata  => mirror_bits(s_tdata),
+    s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => (others => 'U'),
+    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
     s_tvalid => conv_tvalid(3),
     s_tlast  => s_tlast,
     -- AXI stream output
     m_tready => axi_32apsk.tready,
     m_tdata  => axi_32apsk.tdata,
     m_tkeep  => open,
-    m_tid    => open,
+    m_tid    => axi_32apsk.tuser,
     m_tvalid => axi_32apsk.tvalid,
     m_tlast  => axi_32apsk.tlast);
 
-  -- FIXME: Make this a RAM and let the CPU write the appropriate values esp for 16 APSK
-  -- and 32 APSK since the values depend on the code rate
-  coefficients_rom_u : entity fpga_cores.rom_inference
-  generic map (
-    ROM_DATA     => CONSTELLATION_ROM,
-    ROM_TYPE     => auto,
-    OUTPUT_DELAY => 1)
-  port map (
-    clk    => clk,
-    clken  => '1',
-    addr   => rom_addr,
-    rddata => rom_data);
+  -- QPSK and 8 PSK values are constant but 16 APSK and 32 APSK depend on the coding
+  -- rate. Currently we're supporting any number of QPSK and/or 8 PSK streams, but 16 APSK
+  -- and 32 APSK are both limited to a single stream
+  mapping_table_u : entity fpga_cores.ram_inference
+    generic map (
+      ADDR_WIDTH   => 6,
+      DATA_WIDTH   => OUTPUT_DATA_WIDTH,
+      RAM_TYPE     => auto,
+      OUTPUT_DELAY => 1)
+    port map (
+      -- Port A
+      clk_a     => clk,
+      clken_a   => '1',
+      wren_a    => ram_wren,
+      addr_a    => ram_addr,
+      wrdata_a  => ram_wdata,
+      rddata_a  => ram_rdata,
+
+      -- Port B
+      clk_b     => clk,
+      clken_b   => '1',
+      addr_b    => map_addr,
+      rddata_b  => map_data);
 
   ------------------------------
   -- Asynchronous assignments --
@@ -262,25 +261,37 @@ begin
              "1000" when cfg_constellation = mod_32apsk else
              (others => 'U');
 
-  axi_qpsk.tready <= m_tready when cfg_constellation = mod_qpsk else '0';
-  axi_8psk.tready <= m_tready when cfg_constellation = mod_8psk else '0';
-  axi_16apsk.tready <= m_tready when cfg_constellation = mod_16apsk else '0';
-  axi_32apsk.tready <= m_tready when cfg_constellation = mod_32apsk else '0';
-
-  -- Addr CONSTELLATION_ROM offsets to the width converter output
+  -- Addr CONSTELLATION_ROM offsets to the width converter output. Each table starts
+  -- immediatelly after the previous
   addr_qpsk   <= "0000" & axi_qpsk.tdata;
-  addr_8psk   <= std_logic_vector("000" & unsigned(axi_8psk.tdata) + 4);
-  addr_16apsk <= std_logic_vector("00" & unsigned(axi_16apsk.tdata) + 4 + 8);
-  addr_32apsk <= std_logic_vector("0" & unsigned(axi_32apsk.tdata) + 4 + 8 + 16);
+  addr_8psk   <= std_logic_vector("000" & unsigned(axi_8psk.tdata) + 4);          -- 8 PSK starts after QPSK
+  addr_16apsk <= std_logic_vector("00" & unsigned(axi_16apsk.tdata) + 4 + 8);     -- 16 APSK starts after QPSK + 8 PSK
+  addr_32apsk <= std_logic_vector("0" & unsigned(axi_32apsk.tdata) + 4 + 8 + 16); -- 32 APSK starts after QPSK + 8 PSK + 16 APSK
 
   -- Only one will be active at a time
-  rom_addr <= (addr_qpsk   and (5 downto 0 => axi_qpsk.tvalid)) or
+  map_addr <= (addr_qpsk   and (5 downto 0 => axi_qpsk.tvalid)) or
               (addr_8psk   and (5 downto 0 => axi_8psk.tvalid)) or
               (addr_16apsk and (5 downto 0 => axi_16apsk.tvalid)) or
               (addr_32apsk and (5 downto 0 => axi_32apsk.tvalid));
 
-  m_tdata  <= rom_data when m_tvalid_i = '1' else (others => 'U');
+  -- Select the config from the active channel (only one will be writing at a time)
+  map_cfg <= (axi_qpsk.tuser   and (sum(CONFIG_INPUT_WIDTHS) - 1 downto 0 => axi_qpsk.tvalid)) or
+             (axi_8psk.tuser   and (sum(CONFIG_INPUT_WIDTHS) - 1 downto 0 => axi_8psk.tvalid)) or
+             (axi_16apsk.tuser and (sum(CONFIG_INPUT_WIDTHS) - 1 downto 0 => axi_16apsk.tvalid)) or
+             (axi_32apsk.tuser and (sum(CONFIG_INPUT_WIDTHS) - 1 downto 0 => axi_32apsk.tvalid));
+
+  egress_frame_type    <= decode(get_field(map_cfg, 0, CONFIG_INPUT_WIDTHS));
+  egress_constellation <= decode(get_field(map_cfg, 1, CONFIG_INPUT_WIDTHS));
+  egress_code_rate     <= decode(get_field(map_cfg, 2, CONFIG_INPUT_WIDTHS));
+
+  axi_qpsk.tready      <= m_tready when egress_constellation = mod_qpsk else '0';
+  axi_8psk.tready      <= m_tready when egress_constellation = mod_8psk else '0';
+  axi_16apsk.tready    <= m_tready when egress_constellation = mod_16apsk else '0';
+  axi_32apsk.tready    <= m_tready when egress_constellation = mod_32apsk else '0';
+
+  m_tdata  <= map_data when m_tvalid_i = '1' else (others => 'U');
   m_tvalid <= m_tvalid_i;
+  m_tlast  <= m_tlast_i and m_tvalid_i;
 
   ---------------
   -- Processes --
@@ -289,17 +300,8 @@ begin
   begin
     if clk'event and clk = '1' then
       m_tvalid_i <= axi_qpsk.tvalid or axi_8psk.tvalid or axi_16apsk.tvalid or axi_32apsk.tvalid;
-      m_tlast    <= axi_qpsk.tlast or axi_8psk.tlast or axi_16apsk.tlast or axi_32apsk.tlast;
+      m_tlast_i  <= axi_qpsk.tlast or axi_8psk.tlast or axi_16apsk.tlast or axi_32apsk.tlast;
     end if;
-  end process;
-
-  process
-  begin
-    wait until rst = '0';
-    for i in 0 to 3 loop
-      info(sformat("CONSTELLATION_ROM[%d] = %r", fo(i), fo(CONSTELLATION_ROM(i))));
-    end loop;
-    wait;
   end process;
 
 end axi_constellation_mapper;

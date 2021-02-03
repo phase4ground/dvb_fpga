@@ -75,6 +75,7 @@ BBFRAME_LENGTH = {
         dtv.C4_5: 12432,
         dtv.C5_6: 13152,
         dtv.C8_9: 14232,
+        dtv.C9_10: 14412,
     },
 }
 

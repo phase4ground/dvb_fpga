@@ -171,8 +171,12 @@ package body dvb_utils_pkg is
   end;
 
   function to_fixed_point (constant x : real; constant width : positive) return signed is
+    variable int : integer := integer(ieee.math_real.round(x * real(2**(width - 1))));
   begin
-    return to_signed(integer(ieee.math_real.round(x * real(2**(width - 1)))), width);
+    if x = 1.0 then
+      return to_signed(integer(int) - 1, width);
+    end if;
+    return to_signed(integer(int), width);
   end;
 
   function cos (constant x : real; constant width : positive) return signed is
