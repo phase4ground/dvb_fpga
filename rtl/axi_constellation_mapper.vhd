@@ -85,8 +85,6 @@ architecture axi_constellation_mapper of axi_constellation_mapper is
   -- Signals --
   -------------
   signal s_tid                : std_logic_vector(TUSER_WIDTH - 1 downto 0);
-  signal m_tvalid_i           : std_logic;
-  signal m_tlast_i            : std_logic;
   signal mux_sel              : std_logic_vector(3 downto 0);
   signal conv_tready          : std_logic_vector(3 downto 0);
   signal conv_tvalid          : std_logic_vector(3 downto 0);
@@ -109,6 +107,10 @@ architecture axi_constellation_mapper of axi_constellation_mapper is
   signal egress_constellation : constellation_t;
   signal egress_frame_type    : frame_type_t;
   signal egress_code_rate     : code_rate_t;
+
+  signal adapter_wr_en        : std_logic;
+  signal adapter_full         : std_logic;
+  signal adapter_wr_last      : std_logic;
 
 begin
 
@@ -255,14 +257,36 @@ begin
       addr_b    => map_addr,
       rddata_b  => map_data);
 
+  -- map data comes with 1 cycle of latency, compensate for that
+  output_adapter_u : entity fpga_cores.axi_stream_master_adapter
+    generic map (
+      MAX_SKEW_CYCLES => 1,
+      TDATA_WIDTH     => OUTPUT_DATA_WIDTH)
+    port map (
+      -- Usual ports
+      clk      => clk,
+      reset    => rst,
+      -- wanna-be AXI interface
+      wr_en    => adapter_wr_en,
+      wr_full  => adapter_full,
+      wr_empty => open,
+      wr_data  => map_data,
+      wr_last  => adapter_wr_last,
+      -- AXI master
+      m_tvalid => m_tvalid,
+      m_tready => m_tready,
+      m_tdata  => m_tdata,
+      m_tlast  => m_tlast);
+
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
-  mux_sel <= "0001" when cfg_constellation = mod_qpsk else
-             "0010" when cfg_constellation = mod_8psk else
-             "0100" when cfg_constellation = mod_16apsk else
-             "1000" when cfg_constellation = mod_32apsk else
-             (others => 'U');
+  with cfg_constellation select
+    mux_sel <= "0001" when mod_qpsk,
+               "0010" when mod_8psk,
+               "0100" when mod_16apsk,
+               "1000" when mod_32apsk,
+               (others => 'U') when others;
 
   -- Addr CONSTELLATION_ROM offsets to the width converter output. Each table starts
   -- immediatelly after the previous
@@ -287,15 +311,12 @@ begin
   egress_constellation <= decode(get_field(map_cfg, 1, CONFIG_INPUT_WIDTHS));
   egress_code_rate     <= decode(get_field(map_cfg, 2, CONFIG_INPUT_WIDTHS));
 
-  axi_qpsk.tready      <= m_tready when egress_constellation = mod_qpsk else '0';
-  axi_8psk.tready      <= m_tready when egress_constellation = mod_8psk else '0';
-  axi_16apsk.tready    <= m_tready when egress_constellation = mod_16apsk else '0';
-  axi_32apsk.tready    <= m_tready when egress_constellation = mod_32apsk else '0';
+  axi_qpsk.tready      <= not adapter_full when egress_constellation = mod_qpsk else '0';
+  axi_8psk.tready      <= not adapter_full when egress_constellation = mod_8psk else '0';
+  axi_16apsk.tready    <= not adapter_full when egress_constellation = mod_16apsk else '0';
+  axi_32apsk.tready    <= not adapter_full when egress_constellation = mod_32apsk else '0';
 
   s_tid    <= encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type);
-  m_tdata  <= map_data when m_tvalid_i = '1' else (others => 'U');
-  m_tvalid <= m_tvalid_i;
-  m_tlast  <= m_tlast_i and m_tvalid_i;
 
   ---------------
   -- Processes --
@@ -303,8 +324,12 @@ begin
   process(clk)
   begin
     if clk'event and clk = '1' then
-      m_tvalid_i <= axi_qpsk.tvalid or axi_8psk.tvalid or axi_16apsk.tvalid or axi_32apsk.tvalid;
-      m_tlast_i  <= axi_qpsk.tlast or axi_8psk.tlast or axi_16apsk.tlast or axi_32apsk.tlast;
+      adapter_wr_en   <= '0';
+      adapter_wr_last <= '0';
+      if not adapter_full then
+        adapter_wr_en   <= axi_qpsk.tvalid or axi_8psk.tvalid or axi_16apsk.tvalid or axi_32apsk.tvalid;
+        adapter_wr_last <= axi_qpsk.tlast or axi_8psk.tlast or axi_16apsk.tlast or axi_32apsk.tlast;
+      end if;
     end if;
   end process;
 

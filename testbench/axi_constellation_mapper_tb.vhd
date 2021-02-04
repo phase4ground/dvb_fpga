@@ -107,15 +107,18 @@ architecture axi_constellation_mapper_tb of axi_constellation_mapper_tb is
   signal data_probability       : real range 0.0 to 1.0 := 1.0;
   signal tready_probability     : real range 0.0 to 1.0 := 1.0;
 
-  -- AXI input
-  signal axi_master             : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
-  -- AXI output
-  signal axi_slave              : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
+  signal expected_tvalid        : std_logic;
   signal expected_tdata         : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
   signal expected_tdata_lendian : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
   signal m_data_valid           : boolean;
   signal s_data_valid           : boolean;
+
+  -- AXI input
+  signal axi_master             : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
+  -- AXI output
+  signal axi_slave              : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
+  signal receiver_busy          : boolean := False;
 
 begin
 
@@ -195,12 +198,12 @@ begin
       rst                => rst,
       -- Config and status
       completed          => open,
-      tvalid_probability => data_probability,
+      tvalid_probability => 1.0,
 
       -- Data output
       m_tready           => axi_slave.tready and axi_slave.tvalid,
       m_tdata            => expected_tdata,
-      m_tvalid           => open,
+      m_tvalid           => expected_tvalid,
       m_tlast            => open);
 
   expected_tdata_lendian <= expected_tdata(23 downto 16) & expected_tdata(31 downto 24) & expected_tdata(7 downto 0) & expected_tdata(15 downto 8);
@@ -235,11 +238,19 @@ begin
     end procedure walk; -- }} ----------------------------------------------------------
 
     procedure wait_for_completion is -- {{ ---------------------------------------------
+      variable msg : msg_t;
     begin
       info(logger, "Waiting for all frames to be read");
+      wait_all_read(net, input_data);
       wait_all_read(net, ref_data);
+      if receiver_busy then
+        wait until not receiver_busy for 100 us;
+        assert not receiver_busy
+          report "Timeout waiting for receiver"
+          severity Error;
+      end if;
       info(logger, "All data has now been read");
-      wait until rising_edge(clk) and axi_slave.tvalid = '0' for 1 ms;
+      wait until rising_edge(clk) and axi_slave.tvalid = '0' for 100 us;
       walk(1);
     end procedure wait_for_completion; -- }} -------------------------------------------
 
@@ -408,7 +419,7 @@ begin
     wait;
   end process; -- }}
 
-  receiver_p : process
+  receiver_p : process -- {{ -----------------------------------------------------------
     constant logger      : logger_t := get_logger("receiver");
     variable word_cnt    : natural  := 0;
     variable frame_cnt   : natural  := 0;
@@ -433,6 +444,8 @@ begin
       );
     end function;
 
+    -- TODO: This does not look great, either make it a proper package so it can be reused
+    -- in other modules or compare using signed
     function "*" ( constant l : iq_pair_t; constant r : real ) return iq_pair_t is
     begin
       return (i => l.i * r, q => l.q * r);
@@ -462,15 +475,16 @@ begin
     variable actual   : iq_pair_t;
     variable expected : iq_pair_t;
 
-
   begin
     wait until axi_slave.tvalid = '1' and axi_slave.tready = '1' and rising_edge(clk);
-    actual   := to_iq_pair(axi_slave.tdata);
-    expected := to_iq_pair(expected_tdata_lendian);
+    receiver_busy <= True;
 
     -- Try to match values literally (works for QPSK and 8 PSK), otherwise convert to real
     -- and compare with a margin of error
     if axi_slave.tdata /= expected_tdata_lendian then
+      actual   := to_iq_pair(axi_slave.tdata);
+      expected := to_iq_pair(expected_tdata_lendian);
+
       if (actual > (0.0, 0.0) and (actual < expected * (1.0 - TOLERANCE) or actual > expected * (1.0 + TOLERANCE))) or
          (actual < (0.0, 0.0) and (actual > expected * (1.0 - TOLERANCE) or actual < expected * (1.0 + TOLERANCE))) then
         error(
@@ -495,11 +509,12 @@ begin
 
     word_cnt := word_cnt + 1;
     if axi_slave.tlast = '1' then
+      receiver_busy <= False;
       info(logger, sformat("Received frame %d with %d words", fo(frame_cnt), fo(word_cnt)));
       word_cnt  := 0;
       frame_cnt := frame_cnt + 1;
     end if;
-  end process;
+  end process; -- }} -------------------------------------------------------------------
 
   axi_slave_tready_gen : process(clk)
     variable tready_rand : RandomPType;
@@ -512,6 +527,5 @@ begin
       end if;
     end if;
   end process;
-
 
 end axi_constellation_mapper_tb;
