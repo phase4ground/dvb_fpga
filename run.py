@@ -537,10 +537,15 @@ def _createModulationTable(config: TestDefinition):
     )
 
     with open(target, "wb") as fd:
-        for cos, sin in _getModulationTable(config):
-            fd.write(bytes(str(cos), encoding="utf8"))
+        table = _getModulationTable(config)
+        # Normalize the maximum value if it's higher than 1.0. In the VHDL side
+        # we're converting to fixed point based on the data width, so values
+        # need to be scaled between [-1.0, 1.0)
+        max_value = max(1.0, max([max(abs(x[0]), abs(x[1])) for x in table]))
+        for cos, sin in table:
+            fd.write(bytes(str(cos / max_value), encoding="utf8"))
             fd.write(b"\n")
-            fd.write(bytes(str(sin), encoding="utf8"))
+            fd.write(bytes(str(sin / max_value), encoding="utf8"))
             fd.write(b"\n")
 
 

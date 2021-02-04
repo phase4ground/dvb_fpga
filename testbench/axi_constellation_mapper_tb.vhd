@@ -91,34 +91,31 @@ architecture axi_constellation_mapper_tb of axi_constellation_mapper_tb is
   -------------
   -- Signals --
   -------------
-  signal clk                : std_logic := '1';
-  signal rst                : std_logic;
+  signal clk                    : std_logic := '1';
+  signal rst                    : std_logic;
 
   -- Mapping RAM config
-  signal ram_wren           : std_logic;
-  signal ram_addr           : std_logic_vector(5 downto 0);
-  signal ram_wdata          : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
-  signal ram_rdata          : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal ram_wren               : std_logic;
+  signal ram_addr               : std_logic_vector(5 downto 0);
+  signal ram_wdata              : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal ram_rdata              : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
-  signal cfg_constellation  : constellation_t;
-  signal cfg_frame_type     : frame_type_t;
-  signal cfg_code_rate      : code_rate_t;
+  signal cfg_constellation      : constellation_t;
+  signal cfg_frame_type         : frame_type_t;
+  signal cfg_code_rate          : code_rate_t;
 
-  signal data_probability   : real range 0.0 to 1.0 := 1.0;
-  signal tready_probability : real range 0.0 to 1.0 := 1.0;
+  signal data_probability       : real range 0.0 to 1.0 := 1.0;
+  signal tready_probability     : real range 0.0 to 1.0 := 1.0;
 
   -- AXI input
-  signal axi_master         : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
+  signal axi_master             : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
   -- AXI output
-  signal axi_slave          : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
-  signal axi_slave_tdata    : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal axi_slave              : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
+  signal expected_tdata         : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal expected_tdata_lendian : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
-  signal m_data_valid       : boolean;
-  signal s_data_valid       : boolean;
-
-  signal tdata_error_cnt    : std_logic_vector(7 downto 0);
-  signal tlast_error_cnt    : std_logic_vector(7 downto 0);
-  signal error_cnt          : std_logic_vector(7 downto 0);
+  signal m_data_valid           : boolean;
+  signal s_data_valid           : boolean;
 
 begin
 
@@ -188,31 +185,25 @@ begin
       m_tlast           => axi_slave.tlast,
       m_tdata           => axi_slave.tdata);
 
-  axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
+  ref_data_u : entity fpga_cores_sim.axi_file_reader
     generic map (
-      READER_NAME     => "ref_data_u",
-      ERROR_CNT_WIDTH => 8,
-      REPORT_SEVERITY => Error,
-      DATA_WIDTH      => OUTPUT_DATA_WIDTH)
+      READER_NAME => "ref_data_u",
+      DATA_WIDTH  => OUTPUT_DATA_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
       rst                => rst,
       -- Config and status
-      tdata_error_cnt    => tdata_error_cnt,
-      tlast_error_cnt    => tlast_error_cnt,
-      error_cnt          => error_cnt,
-      tready_probability => 1.0,
-      -- Debug stuff
-      expected_tdata     => open,
-      expected_tlast     => open,
-      -- Data input
-      s_tready           => axi_slave.tready,
-      s_tdata            => axi_slave_tdata,
-      s_tvalid           => axi_slave.tvalid,
-      s_tlast            => axi_slave.tlast);
+      completed          => open,
+      tvalid_probability => data_probability,
 
-  axi_slave_tdata <= axi_slave.tdata(23 downto 16) & axi_slave.tdata(31 downto 24) & axi_slave.tdata(7 downto 0) & axi_slave.tdata(15 downto 8);
+      -- Data output
+      m_tready           => axi_slave.tready and axi_slave.tvalid,
+      m_tdata            => expected_tdata,
+      m_tvalid           => open,
+      m_tlast            => open);
+
+  expected_tdata_lendian <= expected_tdata(23 downto 16) & expected_tdata(31 downto 24) & expected_tdata(7 downto 0) & expected_tdata(15 downto 8);
 
   ------------------------------
   -- Asynchronous assignments --
@@ -274,8 +265,10 @@ begin
       variable L            : line;
       variable r0, r1       : real;
       variable addr         : integer := initial_addr;
+      variable index        : unsigned(5 downto 0) := (others => '0');
     begin
       info(sformat("Updating mapping RAM from '%s' (initial address is %d)", fo(path), fo(initial_addr)));
+
       file_open(file_handler, path, read_mode);
       while not endfile(file_handler) loop
         readline(file_handler, L);
@@ -284,7 +277,8 @@ begin
         read(L, r1);
         info(
           sformat(
-            "Writing RAM: %2d <= %13s (%r) / %13s (%r)",
+            "[%b] Writing RAM: %2d => %13s (%r) / %13s (%r)",
+            fo(index),
             fo(addr),
             real'image(r0),
             fo(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)),
@@ -299,6 +293,7 @@ begin
           std_logic_vector(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
         );
         addr := addr + 1;
+        index := index + 1;
       end loop;
       file_close(file_handler);
     end procedure; -- }} ---------------------------------------------------------------
@@ -332,12 +327,9 @@ begin
       for i in 0 to number_of_frames - 1 loop
         debug(logger, "Setting up frame #" & to_string(i));
 
-        -- FIXME: Use the packed data file
         read_file(net => net,
           file_reader => input_data,
           filename    => data_path & "/bit_interleaver_output_packed.bin",
-          -- filename    => data_path & "/bit_interleaver_output.bin",
-          -- ratio       => get_checker_data_ratio(config.constellation),
           tid         => encode(config.code_rate) & encode(config.constellation) & encode(config.frame_type)
         );
 
@@ -353,8 +345,10 @@ begin
 
     test_runner_setup(runner, RUNNER_CFG);
     show(display_handler, debug);
-    hide(get_logger("file_reader_t(input_data)"), display_handler, debug, True);
-    hide(get_logger("file_reader_t(ref_data)"), display_handler, debug, True);
+    hide(get_logger("file_reader_t(input_data_u)"), display_handler, debug, True);
+    hide(get_logger("file_reader_t(ref_data_u)"), display_handler, debug, True);
+    hide(get_logger("file_reader_t(input_data_u)"), display_handler, info, True);
+    hide(get_logger("file_reader_t(ref_data_u)"), display_handler, info, True);
 
     while test_suite loop
       rst                <= '1';
@@ -413,6 +407,111 @@ begin
     test_runner_cleanup(runner);
     wait;
   end process; -- }}
+
+  receiver_p : process
+    constant logger      : logger_t := get_logger("receiver");
+    variable word_cnt    : natural  := 0;
+    variable frame_cnt   : natural  := 0;
+
+    type iq_pair_t is record
+      i : real;
+      q : real;
+    end record;
+
+    function to_real ( constant v : std_logic_vector ) return real is
+      constant width : integer := v'length;
+    begin
+      return real(to_integer(signed(v))) / real(2**(width - 1));
+    end;
+
+    function to_iq_pair ( constant v : std_logic_vector ) return iq_pair_t is
+      constant width : integer := v'length;
+    begin
+      return iq_pair_t'(
+        i => to_real(v(width - 1 downto width/2)),
+        q => to_real(v(width/2 - 1 downto 0))
+      );
+    end function;
+
+    function "*" ( constant l : iq_pair_t; constant r : real ) return iq_pair_t is
+    begin
+      return (i => l.i * r, q => l.q * r);
+    end;
+
+    function "<" ( constant l, r : iq_pair_t ) return boolean is
+    begin
+      return l.i < r.i and l.q < r.q;
+    end;
+
+    function "<=" ( constant l, r : iq_pair_t ) return boolean is
+    begin
+      return l.i <= r.i and l.q <= r.q;
+    end;
+
+    function ">" ( constant l, r : iq_pair_t ) return boolean is
+    begin
+      return l.i > r.i and l.q > r.q;
+    end;
+
+    function ">=" ( constant l, r : iq_pair_t ) return boolean is
+    begin
+      return l.i >= r.i and l.q >= r.q;
+    end;
+
+    constant TOLERANCE : real := 0.05;
+    variable actual   : iq_pair_t;
+    variable expected : iq_pair_t;
+
+
+  begin
+    wait until axi_slave.tvalid = '1' and axi_slave.tready = '1' and rising_edge(clk);
+    actual   := to_iq_pair(axi_slave.tdata);
+    expected := to_iq_pair(expected_tdata_lendian);
+
+    -- Try to match values literally (works for QPSK and 8 PSK), otherwise convert to real
+    -- and compare with a margin of error
+    if axi_slave.tdata /= expected_tdata_lendian then
+      if (actual > (0.0, 0.0) and (actual < expected * (1.0 - TOLERANCE) or actual > expected * (1.0 + TOLERANCE))) or
+         (actual < (0.0, 0.0) and (actual > expected * (1.0 - TOLERANCE) or actual < expected * (1.0 + TOLERANCE))) then
+        error(
+          logger,
+          sformat(
+            "[%d, %d] got" & lf & "%r (%s, %s), expected" & lf & "%r (%s, %s)" & lf & "(between   (%s, %s)" & lf & "and        (%s, %s))",
+            fo(frame_cnt),
+            fo(word_cnt),
+            fo(axi_slave.tdata),
+            real'image(actual.i),
+            real'image(actual.q),
+            fo(expected_tdata_lendian),
+            real'image(expected.i),
+            real'image(expected.q),
+            real'image(expected.i * (1.0 - TOLERANCE)),
+            real'image(expected.q * (1.0 - TOLERANCE)),
+            real'image(expected.i * (1.0 + TOLERANCE)),
+            real'image(expected.q * (1.0 + TOLERANCE))
+          ));
+      end if;
+    end if;
+
+    word_cnt := word_cnt + 1;
+    if axi_slave.tlast = '1' then
+      info(logger, sformat("Received frame %d with %d words", fo(frame_cnt), fo(word_cnt)));
+      word_cnt  := 0;
+      frame_cnt := frame_cnt + 1;
+    end if;
+  end process;
+
+  axi_slave_tready_gen : process(clk)
+    variable tready_rand : RandomPType;
+  begin
+    if rising_edge(clk) then
+      -- Generate a tready enable with the configured probability
+      axi_slave.tready <= '0';
+      if tready_rand.RandReal(1.0) <= tready_probability then
+        axi_slave.tready <= '1';
+      end if;
+    end if;
+  end process;
 
 
 end axi_constellation_mapper_tb;
