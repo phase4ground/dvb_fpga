@@ -19,12 +19,13 @@
 -- You should have received a copy of the GNU General Public License
 -- along with DVB FPGA.  If not, see <http://www.gnu.org/licenses/>.
 
+-- vunit: run_all_in_same_sim
+
 use std.textio.all;
 
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use ieee.math_real.all;
 
 library vunit_lib;
 context vunit_lib.vunit_context;
@@ -90,31 +91,34 @@ architecture axi_constellation_mapper_tb of axi_constellation_mapper_tb is
   -------------
   -- Signals --
   -------------
-  signal clk                    : std_logic := '1';
-  signal rst                    : std_logic;
+  signal clk                : std_logic := '1';
+  signal rst                : std_logic;
 
   -- Mapping RAM config
-  signal ram_wren               : std_logic;
-  signal ram_addr               : std_logic_vector(5 downto 0);
-  signal ram_wdata              : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
-  signal ram_rdata              : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal ram_wren           : std_logic;
+  signal ram_addr           : std_logic_vector(5 downto 0);
+  signal ram_wdata          : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal ram_rdata          : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
-  signal cfg_constellation      : constellation_t;
-  signal cfg_frame_type         : frame_type_t;
-  signal cfg_code_rate          : code_rate_t;
+  signal cfg_constellation  : constellation_t;
+  signal cfg_frame_type     : frame_type_t;
+  signal cfg_code_rate      : code_rate_t;
 
-  signal data_probability       : real range 0.0 to 1.0 := 1.0;
-  signal tready_probability     : real range 0.0 to 1.0 := 1.0;
+  signal data_probability   : real range 0.0 to 1.0 := 1.0;
+  signal tready_probability : real range 0.0 to 1.0 := 1.0;
 
   -- AXI input
-  signal axi_master             : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
+  signal axi_master         : axi_stream_data_bus_t(tdata(INPUT_DATA_WIDTH - 1 downto 0));
   -- AXI output
-  signal axi_slave              : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
-  signal expected               : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
-  signal dbg_expected : integer;
+  signal axi_slave          : axi_stream_data_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
+  signal axi_slave_tdata    : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
-  signal m_data_valid           : boolean;
-  signal s_data_valid           : boolean;
+  signal m_data_valid       : boolean;
+  signal s_data_valid       : boolean;
+
+  signal tdata_error_cnt    : std_logic_vector(7 downto 0);
+  signal tlast_error_cnt    : std_logic_vector(7 downto 0);
+  signal error_cnt          : std_logic_vector(7 downto 0);
 
 begin
 
@@ -184,23 +188,31 @@ begin
       m_tlast           => axi_slave.tlast,
       m_tdata           => axi_slave.tdata);
 
-  ref_data_u : entity fpga_cores_sim.axi_file_reader
+  axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => "ref_data_u",
+      ERROR_CNT_WIDTH => 8,
+      REPORT_SEVERITY => Error,
       DATA_WIDTH      => OUTPUT_DATA_WIDTH)
     port map (
-        -- Usual ports
-        clk                => clk,
-        rst                => rst,
-        -- Config and status
-        completed          => open,
-        tvalid_probability => 1.0,
+      -- Usual ports
+      clk                => clk,
+      rst                => rst,
+      -- Config and status
+      tdata_error_cnt    => tdata_error_cnt,
+      tlast_error_cnt    => tlast_error_cnt,
+      error_cnt          => error_cnt,
+      tready_probability => 1.0,
+      -- Debug stuff
+      expected_tdata     => open,
+      expected_tlast     => open,
+      -- Data input
+      s_tready           => axi_slave.tready,
+      s_tdata            => axi_slave_tdata,
+      s_tvalid           => axi_slave.tvalid,
+      s_tlast            => axi_slave.tlast);
 
-        -- Data output
-        m_tready           => expected.tready,
-        m_tdata            => expected.tdata,
-        m_tvalid           => expected.tvalid,
-        m_tlast            => expected.tlast);
+  axi_slave_tdata <= axi_slave.tdata(23 downto 16) & axi_slave.tdata(31 downto 24) & axi_slave.tdata(7 downto 0) & axi_slave.tdata(15 downto 8);
 
   ------------------------------
   -- Asynchronous assignments --
@@ -212,16 +224,15 @@ begin
   m_data_valid <= axi_master.tvalid = '1' and axi_master.tready = '1';
   s_data_valid <= axi_slave.tvalid = '1' and axi_slave.tready = '1';
 
-  expected.tready <= '1' when s_data_valid else '0';
-
   ---------------
   -- Processes --
   ---------------
   main : process -- {{
-    constant self       : actor_t       := new_actor("main");
-    constant logger     : logger_t      := get_logger("main");
-    variable input_data : file_reader_t := new_file_reader("input_data_u");
-    variable ref_data   : file_reader_t := new_file_reader("ref_data_u");
+    constant self        : actor_t       := new_actor("main");
+    constant logger      : logger_t      := get_logger("main");
+    variable input_data  : file_reader_t := new_file_reader("input_data_u");
+    variable ref_data    : file_reader_t := new_file_reader("ref_data_u");
+    variable prev_config : config_t;
 
     procedure walk(constant steps : natural) is -- {{ ----------------------------------
     begin
@@ -231,6 +242,15 @@ begin
         end loop;
       end if;
     end procedure walk; -- }} ----------------------------------------------------------
+
+    procedure wait_for_completion is -- {{ ---------------------------------------------
+    begin
+      info(logger, "Waiting for all frames to be read");
+      wait_all_read(net, ref_data);
+      info(logger, "All data has now been read");
+      wait until rising_edge(clk) and axi_slave.tvalid = '0' for 1 ms;
+      walk(1);
+    end procedure wait_for_completion; -- }} -------------------------------------------
 
     procedure write_ram ( -- {{ --------------------------------------------------------
       constant addr : in integer;
@@ -245,10 +265,49 @@ begin
       ram_wdata <= (others => 'U');
     end procedure; -- }} ---------------------------------------------------------------
 
+    -- Write the exact value so we know data was picked up correctly without having to
+    -- convert into IQ
+    procedure update_mapping_ram ( -- {{ -----------------------------------------------
+      constant initial_addr : integer;
+      constant path         : string) is
+      file file_handler     : text;
+      variable L            : line;
+      variable r0, r1       : real;
+      variable addr         : integer := initial_addr;
+    begin
+      info(sformat("Updating mapping RAM from '%s' (initial address is %d)", fo(path), fo(initial_addr)));
+      file_open(file_handler, path, read_mode);
+      while not endfile(file_handler) loop
+        readline(file_handler, L);
+        read(L, r0);
+        readline(file_handler, L);
+        read(L, r1);
+        info(
+          sformat(
+            "Writing RAM: %2d <= %13s (%r) / %13s (%r)",
+            fo(addr),
+            real'image(r0),
+            fo(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)),
+            real'image(r1),
+            fo(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+          )
+        );
+
+        write_ram(
+          addr,
+          std_logic_vector(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)) &
+          std_logic_vector(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+        );
+        addr := addr + 1;
+      end loop;
+      file_close(file_handler);
+    end procedure; -- }} ---------------------------------------------------------------
+
     procedure run_test ( -- {{ ---------------------------------------------------------
       constant config           : config_t;
       constant number_of_frames : in positive) is
       constant data_path        : string := strip(config.base_path, chars => (1 to 1 => nul));
+      variable initial_addr     : integer := 0;
     begin
       info(logger, "Running test with:");
       info(logger, " - constellation  : " & constellation_t'image(config.constellation));
@@ -256,15 +315,29 @@ begin
       info(logger, " - code_rate      : " & code_rate_t'image(config.code_rate));
       info(logger, " - data path      : " & data_path);
 
+      -- Only update the mapping RAM if the config actually requires that
+      if config /= prev_config then
+        wait_for_completion;
+        case config.constellation is
+          when mod_qpsk => initial_addr := 0;
+          when mod_8psk => initial_addr := 4;
+          when mod_16apsk => initial_addr := 12;
+          when mod_32apsk => initial_addr := 28;
+          when others => null;
+        end case;
+        update_mapping_ram(initial_addr, data_path & "/modulation_table.bin");
+        prev_config := config;
+      end if;
+
       for i in 0 to number_of_frames - 1 loop
         debug(logger, "Setting up frame #" & to_string(i));
 
         -- FIXME: Use the packed data file
         read_file(net => net,
           file_reader => input_data,
-          -- filename    => data_path & "/bit_interleaver_output_packed.bin",
-          filename    => data_path & "/bit_interleaver_output.bin",
-          ratio       => get_checker_data_ratio(config.constellation),
+          filename    => data_path & "/bit_interleaver_output_packed.bin",
+          -- filename    => data_path & "/bit_interleaver_output.bin",
+          -- ratio       => get_checker_data_ratio(config.constellation),
           tid         => encode(config.code_rate) & encode(config.constellation) & encode(config.frame_type)
         );
 
@@ -274,62 +347,9 @@ begin
 
     end procedure run_test; -- }} ------------------------------------------------------
 
-    procedure wait_for_completion is -- {{ ---------------------------------------------
-      variable msg : msg_t;
-    begin
-      info(logger, "Waiting for all frames to be read");
-      wait_all_read(net, ref_data);
-      info(logger, "All data has now been read");
-
-      wait until rising_edge(clk) and axi_slave.tvalid = '0' for 1 ms;
-
-      walk(1);
-
-    end procedure wait_for_completion; -- }} -------------------------------------------
-
-    -- Write the exact value so we know data was picked up correctly without having to
-    -- convert into IQ
-    procedure init_ram is -- {{ --------------------------------------------------------
-    begin
-      -- QPSK
-      for i in 0 to 3 loop
-        write_ram(
-          i, 
-          std_logic_vector(to_unsigned(4, OUTPUT_DATA_WIDTH/2)) &
-          std_logic_vector(to_unsigned(i, OUTPUT_DATA_WIDTH/2))
-        );
-      end loop;
-      -- 8 PSK
-      for i in 0 to 7 loop
-        write_ram(
-          i + 4, 
-          std_logic_vector(to_unsigned(8, OUTPUT_DATA_WIDTH/2)) &
-          std_logic_vector(to_unsigned(i, OUTPUT_DATA_WIDTH/2))
-        );
-      end loop;
-      -- 16 APSK
-      for i in 0 to 15 loop
-        write_ram(
-          i + 12, 
-          std_logic_vector(to_unsigned(16, OUTPUT_DATA_WIDTH/2)) &
-          std_logic_vector(to_unsigned(i, OUTPUT_DATA_WIDTH/2))
-        );
-      end loop;
-      -- 32 APSK
-      for i in 0 to 31 loop
-        write_ram(
-          i + 28, 
-          std_logic_vector(to_unsigned(32, OUTPUT_DATA_WIDTH/2)) &
-          std_logic_vector(to_unsigned(i, OUTPUT_DATA_WIDTH/2))
-        );
-      end loop;
-    end procedure; -- }} ---------------------------------------------------------------
-
   begin
 
     ram_wren  <= '0';
-    ram_addr  <= (others => 'U');
-    ram_wdata <= (others => 'U');
 
     test_runner_setup(runner, RUNNER_CFG);
     show(display_handler, debug);
@@ -344,10 +364,6 @@ begin
       walk(32);
 
       rst <= '0';
-
-      walk(16);
-
-      init_ram;
 
       walk(16);
 
@@ -398,92 +414,5 @@ begin
     wait;
   end process; -- }}
 
-  receiver_p : process
-    constant logger      : logger_t := get_logger("receiver");
-    variable word_cnt    : natural  := 0;
-    variable frame_cnt   : natural  := 0;
-
-    variable axi_data        : unsigned(OUTPUT_DATA_WIDTH/2 - 1 downto 0);
-    variable table        : integer;
-    variable expected_int : integer;
-
-    impure function demodulate ( constant v : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0) ) return integer is
-    begin
-      if table = 4 then
-        -- case v is
-        --   when x"825A825A" => return 0;
-        --   when x"FF7F0000" => return 1;
-        --   when x"00800000" => return 2;
-        --   when x"7EA57EA5" => return 3;
-        --   when x"0000FF7F" => return 4;
-        --   when x"825A7EA5" => return 5;
-        --   when x"7EA5825A" => return 6;
-        --   when x"00000080" => return 7;
-        --   when others =>
-        --     null;
-        -- end case;
-      end if;
-      if table = 8 then
-        case v is
-          when x"825A825A" => return 0;
-          when x"FF7F0000" => return 1;
-          when x"00800000" => return 2;
-          when x"7EA57EA5" => return 3;
-          when x"0000FF7F" => return 4;
-          when x"825A7EA5" => return 5;
-          when x"7EA5825A" => return 6;
-          when x"00000080" => return 7;
-          when others =>
-            null;
-        end case;
-      end if;
-
-      report sformat("Don't know how to demodulate %r", fo(v))
-      severity Warning;
-
-      return -1;
-    end;
-
-  begin
-    wait until axi_slave.tvalid = '1' and axi_slave.tready = '1' and rising_edge(clk);
-    table := to_integer(unsigned(axi_slave.tdata(OUTPUT_DATA_WIDTH - 1 downto OUTPUT_DATA_WIDTH/2)));
-    expected_int := demodulate(expected.tdata);
-    axi_data := unsigned(axi_slave.tdata(OUTPUT_DATA_WIDTH/2 - 1 downto 0));
-
-    dbg_expected <= expected_int;
-
-    if axi_data /= expected_int then
-      error(
-        logger,
-        sformat(
-          "[%d, %d] got %d (%r), expected %d (%r)",
-          fo(frame_cnt),
-          fo(word_cnt),
-          fo(axi_slave.tdata),
-          fo(axi_slave.tdata),
-          fo(expected_int),
-          fo(expected.tdata)
-        ));
-    end if;
-
-    word_cnt := word_cnt + 1;
-    if axi_slave.tlast = '1' then
-      info(logger, sformat("Received frame %d with %d words", fo(frame_cnt), fo(word_cnt)));
-      word_cnt  := 0;
-      frame_cnt := frame_cnt + 1;
-    end if;
-  end process;
-
-  axi_slave_tready_gen : process(clk)
-    variable tready_rand : RandomPType;
-  begin
-    if rising_edge(clk) then
-      -- Generate a tready enable with the configured probability
-      axi_slave.tready <= '0';
-      if tready_rand.RandReal(1.0) <= tready_probability then
-        axi_slave.tready <= '1';
-      end if;
-    end if;
-  end process;
 
 end axi_constellation_mapper_tb;

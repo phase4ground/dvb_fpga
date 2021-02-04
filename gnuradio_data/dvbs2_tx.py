@@ -109,6 +109,13 @@ def get_ratio(constellation):
 
 class UnknownFrameLength(Exception):
     def __init__(self, frame_type, code_rate):
+        if frame_type == dtv.FECFRAME_NORMAL:
+            self.frame_type = 'FECFRAME_NORMAL'
+        elif frame_type == dtv.FECFRAME_SHORT:
+            self.frame_type = 'FECFRAME_SHORT'
+        else:
+            self.frame_type = frame_type
+
         self.frame_type = frame_type
         self.code_rate = code_rate
 

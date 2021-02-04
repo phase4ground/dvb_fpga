@@ -79,9 +79,12 @@ architecture axi_constellation_mapper of axi_constellation_mapper is
     1 => CONSTELLATION_WIDTH,
     2 => CODE_RATE_WIDTH);
 
+  constant TUSER_WIDTH : integer := sum(CONFIG_INPUT_WIDTHS);
+
   -------------
   -- Signals --
   -------------
+  signal s_tid                : std_logic_vector(TUSER_WIDTH - 1 downto 0);
   signal m_tvalid_i           : std_logic;
   signal m_tlast_i            : std_logic;
   signal mux_sel              : std_logic_vector(3 downto 0);
@@ -142,7 +145,7 @@ begin
     s_tready => conv_tready(0),
     s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
+    s_tid    => s_tid,
     s_tvalid => conv_tvalid(0),
     s_tlast  => s_tlast,
     -- AXI stream output
@@ -167,7 +170,7 @@ begin
     s_tready => conv_tready(1),
     s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
+    s_tid    => s_tid,
     s_tvalid => conv_tvalid(1),
     s_tlast  => s_tlast,
     -- AXI stream output
@@ -192,7 +195,7 @@ begin
     s_tready => conv_tready(2),
     s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
+    s_tid    => s_tid,
     s_tvalid => conv_tvalid(2),
     s_tlast  => s_tlast,
     -- AXI stream output
@@ -217,7 +220,7 @@ begin
     s_tready => conv_tready(3),
     s_tdata  => s_tdata,
     s_tkeep  => (others => '1'),
-    s_tid    => encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type),
+    s_tid    => s_tid,
     s_tvalid => conv_tvalid(3),
     s_tlast  => s_tlast,
     -- AXI stream output
@@ -289,6 +292,7 @@ begin
   axi_16apsk.tready    <= m_tready when egress_constellation = mod_16apsk else '0';
   axi_32apsk.tready    <= m_tready when egress_constellation = mod_32apsk else '0';
 
+  s_tid    <= encode(cfg_code_rate) & encode(cfg_constellation) & encode(cfg_frame_type);
   m_tdata  <= map_data when m_tvalid_i = '1' else (others => 'U');
   m_tvalid <= m_tvalid_i;
   m_tlast  <= m_tlast_i and m_tvalid_i;
