@@ -33,7 +33,10 @@ use ieee.numeric_std.all;
 -- Entity declaration --
 ------------------------
 entity axi_baseband_scrambler is
-  generic (DATA_WIDTH : positive := 8);
+  generic (
+    TDATA_WIDTH : positive := 8;
+    TID_WIDTH   : natural  := 0
+  );
   port (
     -- Usual ports
     clk      : in  std_logic;
@@ -41,15 +44,17 @@ entity axi_baseband_scrambler is
 
     -- AXI input
     s_tvalid : in  std_logic;
-    s_tdata  : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
     s_tlast  : in  std_logic;
     s_tready : out std_logic;
+    s_tdata  : in  std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    s_tid    : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready : in  std_logic;
     m_tvalid : out std_logic;
     m_tlast  : out std_logic;
-    m_tdata  : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    m_tdata  : out std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    m_tid    : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_baseband_scrambler;
 
 architecture axi_baseband_scrambler of axi_baseband_scrambler is
@@ -63,25 +68,29 @@ architecture axi_baseband_scrambler of axi_baseband_scrambler is
   -------------
   -- Signals --
   -------------
-  signal lfsr     : std_logic_vector(LFSR_WIDTH - 1 downto 0);
-  signal s_axi_dv : std_logic;
-  signal m_axi_dv : std_logic;
+  signal lfsr       : std_logic_vector(LFSR_WIDTH - 1 downto 0);
+  signal s_axi_dv   : std_logic;
+  signal m_axi_dv   : std_logic;
 
   -- Internals
   signal s_tready_i : std_logic;
   signal m_tvalid_i : std_logic;
+  signal m_tdata_i  : std_logic_vector(TDATA_WIDTH - 1 downto 0);
+  signal m_tid_i    : std_logic_vector(TID_WIDTH - 1 downto 0);
 
 begin
 
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
-  s_axi_dv <= '1' when s_tready_i = '1' and s_tvalid = '1' else '0';
-  m_axi_dv <= '1' when m_tready = '1' and m_tvalid_i = '1' else '0';
+  s_axi_dv <= s_tready_i and s_tvalid;
+  m_axi_dv <= m_tready and m_tvalid_i;
 
   s_tready_i <= m_tready;
 
   -- Assign internals
+  m_tdata  <= m_tdata_i when m_tvalid_i = '1' else (others => 'U');
+  m_tid    <= m_tid_i when m_tvalid_i = '1' else (others => 'U');
   s_tready <= s_tready_i;
   m_tvalid <= m_tvalid_i;
 
@@ -96,6 +105,7 @@ begin
       m_tlast    <= '0';
       m_tvalid_i <= '0';
     elsif clk'event and clk = '1' then
+      m_tid_i    <= s_tid;
 
       if m_axi_dv = '1' then
         m_tvalid_i <= '0';
@@ -108,9 +118,9 @@ begin
 
         -- Calculate the next LFSR
         next_lfsr := lfsr;
-        for i in 0 to DATA_WIDTH - 1 loop
+        for i in 0 to TDATA_WIDTH - 1 loop
           next_lfsr := next_lfsr(LFSR_WIDTH - 2 downto 0) & (next_lfsr(13) xor next_lfsr(14));
-          m_tdata(DATA_WIDTH - 1 - i) <= next_lfsr(0) xor s_tdata(DATA_WIDTH - 1 - i);
+          m_tdata_i(TDATA_WIDTH - 1 - i) <= next_lfsr(0) xor s_tdata(TDATA_WIDTH - 1 - i);
         end loop;
 
         -- Reinit the LFSR at every end of frame

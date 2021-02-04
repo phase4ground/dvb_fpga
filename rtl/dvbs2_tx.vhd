@@ -91,7 +91,9 @@ begin
   -- Port mappings --
   -------------------
   bb_scrambler_u : entity work.axi_baseband_scrambler
-    generic map (DATA_WIDTH => DATA_WIDTH)
+    generic map (
+      TDATA_WIDTH => DATA_WIDTH,
+      TID_WIDTH  => 0)
     port map (
       -- Usual ports
       clk      => clk,
@@ -102,6 +104,7 @@ begin
       s_tdata  => tdata(0),
       s_tlast  => tlast(0),
       s_tready => tready(0),
+      s_tid    => (others => 'U'),
 
       -- AXI output
       m_tready => tready(1),
@@ -195,6 +198,7 @@ begin
       m_tlast           => tlast(3),
       m_tdata           => tdata(3));
 
+  -- QPSK doesn't go through interleaving at all
   bit_interleaver_config_fifo_u : entity work.config_fifo
     generic map ( FIFO_DEPTH => 4 )
     port map (

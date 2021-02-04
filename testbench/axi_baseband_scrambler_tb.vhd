@@ -36,9 +36,11 @@ use osvvm.RandomPkg.all;
 library str_format;
 use str_format.str_format_pkg.all;
 
+library fpga_cores;
+use fpga_cores.axi_pkg.all;
+
 library fpga_cores_sim;
-use fpga_cores_sim.testbench_utils_pkg.all;
-use fpga_cores_sim.file_utils_pkg.all;
+context fpga_cores_sim.sim_context;
 
 use work.dvb_utils_pkg.all;
 use work.dvb_sim_utils_pkg.all;
@@ -47,7 +49,7 @@ entity axi_baseband_scrambler_tb is
   generic (
     RUNNER_CFG            : string;
     TEST_CFG              : string;
-    DATA_WIDTH            : integer := 8;
+    TDATA_WIDTH           : integer := 8;
     NUMBER_OF_TEST_FRAMES : integer := 8);
 end axi_baseband_scrambler_tb;
 
@@ -56,10 +58,10 @@ architecture axi_baseband_scrambler_tb of axi_baseband_scrambler_tb is
   ---------------
   -- Constants --
   ---------------
-  constant configs               : config_array_t := get_test_cfg(TEST_CFG);
+  constant configs         : config_array_t := get_test_cfg(TEST_CFG);
 
-  constant CLK_PERIOD            : time := 5 ns;
-  constant ERROR_CNT_WIDTH       : integer := 8;
+  constant CLK_PERIOD      : time := 5 ns;
+  constant TID_WIDTH       : integer := 8;
 
   -------------
   -- Signals --
@@ -72,24 +74,17 @@ architecture axi_baseband_scrambler_tb of axi_baseband_scrambler_tb is
   signal tready_probability : real range 0.0 to 1.0 := 1.0;
 
   -- AXI input
-  signal m_tready           : std_logic;
-  signal m_tvalid           : std_logic;
-  signal m_tdata            : std_logic_vector(DATA_WIDTH - 1 downto 0);
-  signal m_tlast            : std_logic;
-  signal m_data_valid       : boolean;
-
-  -- AXI output
-  signal s_tvalid           : std_logic;
-  signal s_tdata            : std_logic_vector(DATA_WIDTH - 1 downto 0);
-  signal s_tlast            : std_logic;
-  signal s_tready           : std_logic;
+  signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(TID_WIDTH - 1 downto 0));
   signal s_data_valid       : boolean;
 
-  signal expected_tdata     : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal axi_master         : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(TID_WIDTH - 1 downto 0));
+  signal m_data_valid       : boolean;
+
+  signal expected_tdata     : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal expected_tlast     : std_logic;
-  signal tdata_error_cnt    : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-  signal tlast_error_cnt    : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-  signal error_cnt          : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
+  signal tdata_error_cnt    : std_logic_vector(7 downto 0);
+  signal tlast_error_cnt    : std_logic_vector(7 downto 0);
+  signal error_cnt          : std_logic_vector(7 downto 0);
 
 begin
 
@@ -97,30 +92,34 @@ begin
   -- Port mappings --
   -------------------
   dut : entity work.axi_baseband_scrambler
-    generic map ( DATA_WIDTH => DATA_WIDTH )
+    generic map (
+      TDATA_WIDTH => TDATA_WIDTH,
+      TID_WIDTH   => TID_WIDTH)
     port map (
       -- Usual ports
-      clk               => clk,
-      rst               => rst,
+      clk           => clk,
+      rst           => rst,
 
       -- AXI input
-      s_tvalid          => m_tvalid,
-      s_tdata           => m_tdata,
-      s_tlast           => m_tlast,
-      s_tready          => m_tready,
+      s_tvalid      => axi_slave.tvalid,
+      s_tlast       => axi_slave.tlast,
+      s_tready      => axi_slave.tready,
+      s_tdata       => axi_slave.tdata,
+      s_tid         => axi_slave.tuser,
 
       -- AXI output
-      m_tready          => s_tready,
-      m_tvalid          => s_tvalid,
-      m_tlast           => s_tlast,
-      m_tdata           => s_tdata);
-
+      m_tready      => axi_master.tready,
+      m_tvalid      => axi_master.tvalid,
+      m_tlast       => axi_master.tlast,
+      m_tdata       => axi_master.tdata,
+      m_tid         => axi_master.tuser);
 
   -- AXI file read
   axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
     generic map (
       READER_NAME => "axi_file_reader_u",
-      DATA_WIDTH  => DATA_WIDTH)
+      DATA_WIDTH  => TDATA_WIDTH,
+      TID_WIDTH   => TID_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
@@ -130,17 +129,18 @@ begin
       tvalid_probability => tvalid_probability,
 
       -- Data output
-      m_tready           => m_tready,
-      m_tdata            => m_tdata,
-      m_tvalid           => m_tvalid,
-      m_tlast            => m_tlast);
+      m_tready           => axi_slave.tready,
+      m_tdata            => axi_slave.tdata,
+      m_tid              => axi_slave.tuser,
+      m_tvalid           => axi_slave.tvalid,
+      m_tlast            => axi_slave.tlast);
 
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => "axi_file_compare_u",
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Warning,
-      DATA_WIDTH      => DATA_WIDTH)
+      DATA_WIDTH      => TDATA_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
@@ -154,10 +154,10 @@ begin
       expected_tdata     => expected_tdata,
       expected_tlast     => expected_tlast,
       -- Data input
-      s_tready           => s_tready,
-      s_tdata            => s_tdata,
-      s_tvalid           => s_tvalid,
-      s_tlast            => s_tlast);
+      s_tready           => axi_master.tready,
+      s_tdata            => axi_master.tdata,
+      s_tvalid           => axi_master.tvalid,
+      s_tlast            => axi_master.tlast);
 
   ------------------------------
   -- Asynchronous assignments --
@@ -166,16 +166,17 @@ begin
 
   test_runner_watchdog(runner, 3 ms);
 
-  m_data_valid <= m_tvalid = '1' and m_tready = '1';
-  s_data_valid <= s_tvalid = '1' and s_tready = '1';
+  m_data_valid <= axi_master.tvalid = '1' and axi_master.tready = '1';
+  s_data_valid <= axi_slave.tvalid = '1' and axi_slave.tready = '1';
 
   ---------------
   -- Processes --
   ---------------
   main : process
-    constant self         : actor_t := new_actor("main");
-    variable file_reader  : file_reader_t := new_file_reader("axi_file_reader_u");
-    variable file_checker : file_reader_t := new_file_reader("axi_file_compare_u");
+    constant self           : actor_t := new_actor("main");
+    variable file_reader    : file_reader_t := new_file_reader("axi_file_reader_u");
+    variable file_checker   : file_reader_t := new_file_reader("axi_file_compare_u");
+    variable tid_rand_gen   : RandomPType;
     ------------------------------------------------------------------------------------
     procedure walk(constant steps : natural) is
     begin
@@ -197,7 +198,7 @@ begin
       info(" - data path      : " & data_path);
 
       for i in 0 to number_of_frames - 1 loop
-        read_file(net, file_reader, data_path & "/bb_scrambler_input.bin", "1:8");
+        read_file(net, file_reader, data_path & "/bb_scrambler_input.bin", "1:8", tid_rand_gen.RandSlv(TID_WIDTH));
         read_file(net, file_checker, data_path & "/bch_encoder_input.bin", "1:8");
       end loop;
 
@@ -214,6 +215,7 @@ begin
 
   begin
 
+    tid_rand_gen.InitSeed("seed");
     test_runner_setup(runner, RUNNER_CFG);
     show(display_handler, debug);
 
@@ -267,6 +269,8 @@ begin
 
       end if;
 
+      walk(8);
+      check_equal(error_cnt, 0, sformat("Expected 0 errors but got %d", fo(error_cnt)));
       walk(32);
 
     end loop;
@@ -276,11 +280,27 @@ begin
   end process;
 
   process
+    variable expected_tid   : std_logic_vector(TID_WIDTH - 1 downto 0);
+    variable tid_rand_check : RandomPType;
+    variable first_word     : boolean;
   begin
-    wait until rising_edge(clk);
-    if rst = '0' then
-      check_equal(error_cnt, 0, sformat("Expected 0 errors but got %d", fo(error_cnt)));
-    end if;
+    tid_rand_check.InitSeed("seed");
+    first_word := True;
+    while true loop
+      wait until rising_edge(clk) and axi_master.tvalid = '1' and axi_master.tready = '1';
+      if first_word then
+        expected_tid := tid_rand_check.RandSlv(TID_WIDTH);
+        info(sformat("Updated expected TID to %r", fo(expected_tid)));
+      end if;
+
+      check_equal(axi_master.tuser, expected_tid);
+
+      first_word := False;
+      if axi_master.tlast = '1' then
+        info("Setting first word");
+        first_word := True;
+      end if;
+    end loop;
   end process;
 
 end axi_baseband_scrambler_tb;

@@ -732,7 +732,7 @@ def setupTests(vunit, args):
                 vunit.library("lib").entity("axi_bit_interleaver_tb").add_config(
                     name=f"data_width={data_width},{config.name}",
                     generics=dict(
-                        DATA_WIDTH=data_width,
+                        TDATA_WIDTH=data_width,
                         test_cfg=config.getTestConfigString(),
                         NUMBER_OF_TEST_FRAMES=8,
                     ),
@@ -742,7 +742,7 @@ def setupTests(vunit, args):
             vunit.library("lib").entity("axi_bit_interleaver_tb").add_config(
                 name=f"data_width={data_width},all_parameters",
                 generics=dict(
-                    DATA_WIDTH=data_width,
+                    TDATA_WIDTH=data_width,
                     test_cfg="|".join(all_configs),
                     NUMBER_OF_TEST_FRAMES=2,
                 ),
