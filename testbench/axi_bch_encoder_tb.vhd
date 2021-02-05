@@ -75,10 +75,10 @@ architecture axi_bch_encoder_tb of axi_bch_encoder_tb is
   signal cfg_code_rate      : code_rate_t;
 
   -- AXI input
-  signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
-  signal s_data_valid       : boolean;
   signal axi_master         : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
-  signal m_data_valid       : boolean;
+  signal axi_master_dv      : boolean;
+  signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_slave_dv       : boolean;
 
   signal tvalid_probability : real range 0.0 to 1.0 := 1.0;
   signal tready_probability : real range 0.0 to 1.0 := 1.0;
@@ -103,22 +103,22 @@ begin
       clk            => clk,
       rst            => rst,
 
-      cfg_frame_type => decode(axi_slave.tuser).frame_type,
-      cfg_code_rate  => decode(axi_slave.tuser).code_rate,
+      cfg_frame_type => decode(axi_master.tuser).frame_type,
+      cfg_code_rate  => decode(axi_master.tuser).code_rate,
 
       -- AXI input
-      s_tvalid       => axi_slave.tvalid,
-      s_tlast        => axi_slave.tlast,
-      s_tready       => axi_slave.tready,
-      s_tdata        => axi_slave.tdata,
-      s_tid          => axi_slave.tuser,
+      s_tvalid       => axi_master.tvalid,
+      s_tlast        => axi_master.tlast,
+      s_tready       => axi_master.tready,
+      s_tdata        => axi_master.tdata,
+      s_tid          => axi_master.tuser,
 
       -- AXI output
-      m_tready       => axi_master.tready,
-      m_tvalid       => axi_master.tvalid,
-      m_tlast        => axi_master.tlast,
-      m_tdata        => axi_master.tdata,
-      m_tid          => axi_master.tuser);
+      m_tready       => axi_slave.tready,
+      m_tvalid       => axi_slave.tvalid,
+      m_tlast        => axi_slave.tlast,
+      m_tdata        => axi_slave.tdata,
+      m_tid          => axi_slave.tuser);
 
   axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
     generic map (
@@ -134,11 +134,11 @@ begin
       tvalid_probability => tvalid_probability,
 
       -- Data output
-      m_tready           => axi_slave.tready,
-      m_tdata            => axi_slave.tdata,
-      m_tid              => axi_slave.tuser,
-      m_tvalid           => axi_slave.tvalid,
-      m_tlast            => axi_slave.tlast);
+      m_tready           => axi_master.tready,
+      m_tdata            => axi_master.tdata,
+      m_tid              => axi_master.tuser,
+      m_tvalid           => axi_master.tvalid,
+      m_tlast            => axi_master.tlast);
 
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
@@ -159,18 +159,18 @@ begin
       expected_tdata     => expected_tdata,
       expected_tlast     => expected_tlast,
       -- Data input
-      s_tready           => axi_master.tready,
-      s_tdata            => axi_master.tdata,
-      s_tvalid           => axi_master.tvalid,
-      s_tlast            => axi_master.tlast);
+      s_tready           => axi_slave.tready,
+      s_tdata            => axi_slave.tdata,
+      s_tvalid           => axi_slave.tvalid,
+      s_tlast            => axi_slave.tlast);
 
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
   clk <= not clk after CLK_PERIOD/2;
 
-  m_data_valid <= axi_master.tvalid = '1' and axi_master.tready = '1';
-  s_data_valid <= axi_slave.tvalid = '1' and axi_slave.tready = '1';
+  axi_slave_dv  <= axi_slave.tvalid = '1' and axi_slave.tready = '1';
+  axi_master_dv <= axi_master.tvalid = '1' and axi_master.tready = '1';
 
   ---------------
   -- Processes --
@@ -207,11 +207,6 @@ begin
       config_tuple := (code_rate => config.code_rate, constellation => config.constellation, frame_type => config.frame_type);
 
       for i in 0 to number_of_frames - 1 loop
-        msg := new_msg;
-        push(msg, encode(config_tuple));
-        send(net, find("tid_check"), msg);
-
-
         read_file(net,
           file_reader => file_reader,
           filename    => data_path & "/bch_encoder_input.bin",
@@ -223,6 +218,9 @@ begin
           filename    => data_path & "/ldpc_encoder_input.bin",
           ratio       => "1:8");
 
+        msg := new_msg;
+        push(msg, encode(config_tuple));
+        send(net, find("tid_check"), msg);
       end loop;
 
     end procedure run_test;
@@ -236,7 +234,7 @@ begin
       wait_all_read(net, file_checker);
       info("File reader and checker completed reading");
 
-      wait until rising_edge(clk) and axi_master.tvalid = '0' for 1 ms;
+      wait until rising_edge(clk) and axi_slave.tvalid = '0' for 1 ms;
 
       walk(1);
     end procedure wait_for_transfers;
@@ -293,7 +291,7 @@ begin
       end if;
 
       wait_for_transfers;
-      check_equal(axi_master.tvalid, '0', "axi_master.tvalid should be '0'");
+      check_equal(axi_slave.tvalid, '0', "axi_slave.tvalid should be '0'");
       check_equal(error_cnt, 0);
 
       walk(32);
@@ -316,7 +314,7 @@ begin
     tid_rand_check.InitSeed("seed");
     first_word := True;
     while true loop
-      wait until rising_edge(clk) and axi_master.tvalid = '1' and axi_master.tready = '1';
+      wait until rising_edge(clk) and axi_slave.tvalid = '1' and axi_slave.tready = '1';
       if first_word then
         check_true(has_message(self), "Expected TID not set");
         receive(net, self, msg);
@@ -324,10 +322,10 @@ begin
         info(sformat("Updated expected TID to %r", fo(expected_tid)));
       end if;
 
-      check_equal(axi_master.tuser, expected_tid);
+      check_equal(axi_slave.tuser, expected_tid);
 
       first_word := False;
-      if axi_master.tlast = '1' then
+      if axi_slave.tlast = '1' then
         info("Setting first word");
         first_word := True;
       end if;

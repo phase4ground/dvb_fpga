@@ -66,11 +66,9 @@ architecture axi_ldpc_encoder_core_tb of axi_ldpc_encoder_core_tb is
   -- Constants --
   ---------------
   constant configs           : config_array_t := get_test_cfg(TEST_CFG);
+  constant CLK_PERIOD        : time    := 5 ns;
 
   constant DATA_WIDTH        : integer := 8;
-
-  constant CLK_PERIOD        : time    := 5 ns;
-  constant ERROR_CNT_WIDTH   : integer := 8;
 
   constant DBG_CHECK_FRAME_RAM_WRITES : boolean := False;
 
@@ -88,13 +86,9 @@ architecture axi_ldpc_encoder_core_tb of axi_ldpc_encoder_core_tb is
   signal s_word_cnt         : natural := 0;
   signal s_bit_cnt          : natural := 0;
 
-  signal tdata_error_cnt    : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-  signal tlast_error_cnt    : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-  signal error_cnt          : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-
-  signal cfg_constellation  : constellation_t;
-  signal cfg_frame_type     : frame_type_t;
-  signal cfg_code_rate      : code_rate_t;
+  signal tdata_error_cnt    : std_logic_vector(7 downto 0);
+  signal tlast_error_cnt    : std_logic_vector(7 downto 0);
+  signal error_cnt          : std_logic_vector(7 downto 0);
 
   signal data_probability   : real range 0.0 to 1.0 := 1.0;
   signal table_probability  : real range 0.0 to 1.0 := 1.0;
@@ -102,10 +96,8 @@ architecture axi_ldpc_encoder_core_tb of axi_ldpc_encoder_core_tb is
 
   signal axi_ldpc           : axi_stream_data_bus_t(tdata(2*numbits(max(DVB_N_LDPC)) + 8 - 1 downto 0));
 
-  -- AXI input
-  signal axi_master         : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
-  -- AXI output
-  signal axi_slave          : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
+  signal axi_master         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_slave          : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   signal m_data_valid       : boolean;
   signal s_data_valid       : boolean;
 
@@ -117,34 +109,26 @@ begin
   -------------------
   -- Port mappings --
   -------------------
-  dut : entity work.axi_ldpc_encoder_core
+  -- AXI file read
+  axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
+    generic map (
+      READER_NAME => "axi_file_reader_u",
+      DATA_WIDTH  => DATA_WIDTH,
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
     port map (
       -- Usual ports
-      clk               => clk,
-      rst               => rst,
+      clk                => clk,
+      rst                => rst,
+      -- Config and status
+      completed          => open,
+      tvalid_probability => data_probability,
 
-      cfg_constellation => cfg_constellation,
-      cfg_frame_type    => cfg_frame_type,
-      cfg_code_rate     => cfg_code_rate,
-
-      s_ldpc_offset     => axi_ldpc.tdata(numbits(max(DVB_N_LDPC)) - 1 downto 0),
-      s_ldpc_tuser      => axi_ldpc.tdata(2*numbits(max(DVB_N_LDPC)) - 1 downto numbits(max(DVB_N_LDPC)) ),
-      s_ldpc_next       => axi_ldpc.tdata(2*numbits(max(DVB_N_LDPC))),
-      s_ldpc_tvalid     => axi_ldpc.tvalid,
-      s_ldpc_tlast      => axi_ldpc.tlast,
-      s_ldpc_tready     => axi_ldpc.tready,
-
-      -- AXI input
-      s_tvalid          => axi_master.tvalid,
-      s_tdata           => axi_master.tdata,
-      s_tlast           => axi_master.tlast,
-      s_tready          => axi_master.tready,
-
-      -- AXI output
-      m_tready          => axi_slave.tready,
-      m_tvalid          => axi_slave.tvalid,
-      m_tlast           => axi_slave.tlast,
-      m_tdata           => axi_slave.tdata);
+      -- Data output
+      m_tready           => axi_master.tready,
+      m_tdata            => axi_master.tdata,
+      m_tid              => axi_master.tuser,
+      m_tvalid           => axi_master.tvalid,
+      m_tlast            => axi_master.tlast);
 
   -- Read LDPC tables
   axi_table_u : entity fpga_cores_sim.axi_file_reader
@@ -164,45 +148,42 @@ begin
       m_tvalid           => axi_ldpc.tvalid,
       m_tlast            => axi_ldpc.tlast);
 
-  -- AXI file read
-  axi_file_reader_block : block
-    constant CONFIG_INPUT_WIDTHS: fpga_cores.common_pkg.integer_vector_t := (
-      0 => FRAME_TYPE_WIDTH,
-      1 => CONSTELLATION_WIDTH,
-      2 => CODE_RATE_WIDTH);
+  dut : entity work.axi_ldpc_encoder_core
+    generic map ( TID_WIDTH => ENCODED_CONFIG_WIDTH )
+    port map (
+      -- Usual ports
+      clk               => clk,
+      rst               => rst,
 
-    signal m_tid : std_logic_vector(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0);
-  begin
-    axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
-      generic map (
-        READER_NAME => "axi_file_reader_u",
-        DATA_WIDTH  => DATA_WIDTH,
-        TID_WIDTH   => sum(CONFIG_INPUT_WIDTHS))
-      port map (
-        -- Usual ports
-        clk                => clk,
-        rst                => rst,
-        -- Config and status
-        completed          => open,
-        tvalid_probability => data_probability,
+      cfg_constellation => decode(axi_master.tuser).constellation,
+      cfg_frame_type    => decode(axi_master.tuser).frame_type,
+      cfg_code_rate     => decode(axi_master.tuser).code_rate,
 
-        -- Data output
-        m_tready           => axi_master.tready,
-        m_tdata            => axi_master.tdata,
-        m_tid              => m_tid,
-        m_tvalid           => axi_master.tvalid,
-        m_tlast            => axi_master.tlast);
+      s_ldpc_offset     => axi_ldpc.tdata(numbits(max(DVB_N_LDPC)) - 1 downto 0),
+      s_ldpc_tuser      => axi_ldpc.tdata(2*numbits(max(DVB_N_LDPC)) - 1 downto numbits(max(DVB_N_LDPC)) ),
+      s_ldpc_next       => axi_ldpc.tdata(2*numbits(max(DVB_N_LDPC))),
+      s_ldpc_tvalid     => axi_ldpc.tvalid,
+      s_ldpc_tlast      => axi_ldpc.tlast,
+      s_ldpc_tready     => axi_ldpc.tready,
 
-    -- Decode the TID field with the actual config types
-    cfg_frame_type    <= decode(get_field(m_tid, 0, CONFIG_INPUT_WIDTHS));
-    cfg_constellation <= decode(get_field(m_tid, 1, CONFIG_INPUT_WIDTHS));
-    cfg_code_rate     <= decode(get_field(m_tid, 2, CONFIG_INPUT_WIDTHS));
-  end block axi_file_reader_block;
+      -- AXI input
+      s_tvalid          => axi_master.tvalid,
+      s_tlast           => axi_master.tlast,
+      s_tready          => axi_master.tready,
+      s_tdata           => axi_master.tdata,
+      s_tid             => axi_master.tuser,
+
+      -- AXI output
+      m_tready          => axi_slave.tready,
+      m_tvalid          => axi_slave.tvalid,
+      m_tlast           => axi_slave.tlast,
+      m_tdata           => axi_slave.tdata,
+      m_tid             => axi_slave.tuser);
 
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => "axi_file_compare_u",
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
       DATA_WIDTH      => DATA_WIDTH)
     port map (
@@ -257,6 +238,8 @@ begin
       constant number_of_frames : in positive) is
       constant data_path        : string := strip(config.base_path, chars => (1 to 1 => nul));
       variable calc_ldpc_msg    : msg_t;
+      variable msg              : msg_t;
+      variable config_tuple     : config_tuple_t;
     begin
 
       info(logger, "Running test with:");
@@ -264,6 +247,8 @@ begin
       info(logger, " - frame_type     : " & frame_type_t'image(config.frame_type));
       info(logger, " - code_rate      : " & code_rate_t'image(config.code_rate));
       info(logger, " - data path      : " & data_path);
+
+      config_tuple := (code_rate => config.code_rate, constellation => config.constellation, frame_type => config.frame_type);
 
       for i in 0 to number_of_frames - 1 loop
         debug(logger, "Setting up frame #" & to_string(i));
@@ -273,7 +258,7 @@ begin
           file_reader,
           data_path & "/ldpc_encoder_input.bin",
           "1:8",
-          encode(config.code_rate) & encode(config.constellation) & encode(config.frame_type)
+          encode(config_tuple)
         );
 
         -- ghdl translate_off
@@ -290,6 +275,11 @@ begin
         );
 
         read_file(net, ldpc_table, data_path & "/ldpc_table.bin");
+
+        -- Update the expected TID
+        msg := new_msg;
+        push(msg, encode(config_tuple));
+        send(net, find("tid_check"), msg);
 
       end loop;
 
@@ -783,5 +773,31 @@ begin
 
   end block; -- }}
   -- ghdl translate_on
+
+  tid_check_p : process -- {{ ----------------------------------------------------------
+    constant self           : actor_t := new_actor("tid_check");
+    variable msg            : msg_t;
+    variable expected_tid   : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
+    variable first_word     : boolean;
+  begin
+    first_word := True;
+    while true loop
+      wait until rising_edge(clk) and axi_slave.tvalid = '1' and axi_slave.tready = '1';
+      if first_word then
+        check_true(has_message(self), "Expected TID not set");
+        receive(net, self, msg);
+        expected_tid := pop(msg);
+        info(sformat("Updated expected TID to %r", fo(expected_tid)));
+      end if;
+
+      check_equal(axi_slave.tuser, expected_tid);
+
+      first_word := False;
+      if axi_slave.tlast = '1' then
+        info("Setting first word");
+        first_word := True;
+      end if;
+    end loop;
+  end process; -- }} -------------------------------------------------------------------
 
 end axi_ldpc_encoder_core_tb;

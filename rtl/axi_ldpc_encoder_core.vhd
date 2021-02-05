@@ -36,6 +36,7 @@ use work.ldpc_pkg.all;
 -- Entity declaration --
 ------------------------
 entity axi_ldpc_encoder_core is
+  generic ( TID_WIDTH : integer := 0 );
   port (
     -- Usual ports
     clk               : in  std_logic;
@@ -56,14 +57,16 @@ entity axi_ldpc_encoder_core is
     -- AXI data input
     s_tready          : out std_logic;
     s_tvalid          : in  std_logic;
-    s_tdata           : in  std_logic_vector(7 downto 0);
     s_tlast           : in  std_logic;
+    s_tdata           : in  std_logic_vector(7 downto 0);
+    s_tid             : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready          : in  std_logic;
     m_tvalid          : out std_logic;
     m_tlast           : out std_logic;
-    m_tdata           : out std_logic_vector(7 downto 0));
+    m_tdata           : out std_logic_vector(7 downto 0);
+    m_tid             : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_ldpc_encoder_core;
 
 architecture axi_ldpc_encoder_core of axi_ldpc_encoder_core is
@@ -88,7 +91,8 @@ architecture axi_ldpc_encoder_core of axi_ldpc_encoder_core is
   signal axi_ldpc                : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
   signal axi_ldpc_dv             : std_logic;
 
-  signal axi_passthrough         : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
+  signal axi_passthrough         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(TID_WIDTH - 1 downto 0));
+  signal m_tid_reg               : std_logic_vector(TID_WIDTH - 1 downto 0);
 
   signal axi_bit                 : axi_stream_data_bus_t(tdata(0 downto 0));
   signal dbg_axi_bit_cnt         : unsigned(s_ldpc_tuser'length - 1 downto 0) := (others => '0');
@@ -179,7 +183,8 @@ begin
       1 => 1,
       2 => FRAME_TYPE_WIDTH,
       3 => CONSTELLATION_WIDTH,
-      4 => CODE_RATE_WIDTH);
+      4 => CODE_RATE_WIDTH,
+      5 => TID_WIDTH);
 
     constant AXI_DUP_DATA_WIDTH   : integer := sum(WIDTHS);
 
@@ -190,14 +195,16 @@ begin
 
   begin
 
-    s_tdata_agg <= encode(cfg_code_rate) &
+    s_tdata_agg <= s_tid &
+                   encode(cfg_code_rate) &
                    encode(cfg_constellation) &
                    encode(cfg_frame_type) &
                    s_tlast &
                    s_tdata;
 
-    axi_passthrough.tdata  <= get_field(axi_dup0_tdata, 0, WIDTHS);
-    axi_passthrough.tlast  <= get_field(axi_dup0_tdata, 1, WIDTHS);
+    axi_passthrough.tdata <= get_field(axi_dup0_tdata, 0, WIDTHS);
+    axi_passthrough.tlast <= get_field(axi_dup0_tdata, 1, WIDTHS);
+    axi_passthrough.tuser <= get_field(axi_dup0_tdata, 5, WIDTHS);
 
     axi_ldpc.tdata         <= get_field(axi_dup1_tdata, 0, WIDTHS);
     axi_ldpc.tlast         <= get_field(axi_dup1_tdata, 1, WIDTHS);
@@ -384,6 +391,9 @@ begin
 
   m_tvalid               <= (axi_passthrough.tvalid and axi_passthrough.tready and not forward_encoded_data)
                              or axi_out.tvalid;
+
+  m_tid                  <= (axi_passthrough.tuser and (TID_WIDTH - 1 downto 0 => not forward_encoded_data)) or
+                            (m_tid_reg and (TID_WIDTH - 1 downto 0 => forward_encoded_data));
 
   frame_ram_en           <= (ldpc_table_ram_ready and not wait_frame_completion and axi_bit_has_data)
                             or (ldpc_append_ram_ready and not encoded_wr_full and not frame_out_last_reg);
@@ -663,13 +673,20 @@ begin
       dbg_axi_bit_cnt_reg1 <= (others => 'U');
     elsif rising_edge(clk) then
 
+      if axi_passthrough.tvalid = '1' then
+        m_tid_reg <= axi_passthrough.tuser;
+      end if;
+
       -- Switch between forwarding data from s_axi or the codes calculated internally
-      if axi_passthrough.tvalid = '1' and axi_passthrough.tready = '1' and axi_passthrough.tlast = '1' then
-        forward_encoded_data <= '1';
+      if axi_passthrough.tvalid = '1' and axi_passthrough.tready = '1' then
+        if axi_passthrough.tlast = '1' then
+          forward_encoded_data <= '1';
+        end if;
       end if;
 
       if axi_out.tvalid = '1' and axi_out.tready = '1' and axi_out.tlast = '1' then
         forward_encoded_data <= '0';
+        m_tid_reg            <= (others => 'U');
       end if;
 
       -- AXI input data that was converted to 1 bit needs to be synchronized properly with

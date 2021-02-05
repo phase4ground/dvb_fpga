@@ -131,34 +131,14 @@ begin
       s_tdata        => tdata(1),
       s_tlast        => tlast(1),
       s_tready       => tready(1),
-      s_tid => (others => 'U'),
+      s_tid          => config(1),
 
       -- AXI output
       m_tready       => tready(2),
       m_tvalid       => tvalid(2),
       m_tlast        => tlast(2),
-      m_tdata        => tdata(2));
-
-  ldpc_encoder_cfg_fifo_u : entity work.config_fifo
-    generic map ( FIFO_DEPTH => 4 )
-    port map (
-      -- Usual ports
-      clk             => clk,
-      rst             => rst,
-
-      -- Write side
-      wr_en           => cfg_sample_en(1),
-      full            => open,
-      constellation_i => constellation(1),
-      frame_type_i    => frame_type(1),
-      code_rate_i     => code_rate(1),
-
-      -- Read side
-      rd_en           => cfg_sample_en(2),
-      empty           => open,
-      constellation_o => constellation(2),
-      frame_type_o    => frame_type(2),
-      code_rate_o     => code_rate(2));
+      m_tdata        => tdata(2),
+      m_tid          => config(2));
 
   ldpc_encoder_u : entity work.axi_ldpc_encoder
     port map (
@@ -166,9 +146,9 @@ begin
       clk               => clk,
       rst               => rst,
 
-      cfg_frame_type    => frame_type(2),
-      cfg_code_rate     => code_rate(2),
-      cfg_constellation => constellation(2),
+      cfg_frame_type    => decode(config(2)).frame_type,
+      cfg_code_rate     => decode(config(2)).code_rate,
+      cfg_constellation => decode(config(2)).constellation,
 
       -- AXI input
       s_tvalid          => tvalid(2),
