@@ -195,7 +195,9 @@ begin
       constant number_of_frames : in positive := NUMBER_OF_TEST_FRAMES) is
       constant data_path        : string := strip(config.base_path, chars => (1 to 1 => nul));
       variable msg              : msg_t;
-      variable config_tuple     : config_tuple_t;
+      constant config_tuple     : config_tuple_t := (code_rate => config.code_rate,
+                                                     constellation => config.constellation,
+                                                     frame_type => config.frame_type);
     begin
 
       info("Running test with:");
@@ -203,8 +205,6 @@ begin
       info(" - frame_type     : " & frame_type_t'image(config.frame_type));
       info(" - code_rate      : " & code_rate_t'image(config.code_rate));
       info(" - data path      : " & data_path);
-
-      config_tuple := (code_rate => config.code_rate, constellation => config.constellation, frame_type => config.frame_type);
 
       for i in 0 to number_of_frames - 1 loop
         read_file(net,

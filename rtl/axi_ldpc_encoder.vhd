@@ -103,6 +103,7 @@ begin
       m_tlast      => table_tlast);
 
   encoder_u : entity work.axi_ldpc_encoder_core
+    generic map ( TID_WIDTH => TID_WIDTH )
     port map (
       -- Usual ports
       clk                => clk,

@@ -105,11 +105,13 @@ begin
       m_tlast    <= '0';
       m_tvalid_i <= '0';
     elsif clk'event and clk = '1' then
-      m_tid_i    <= s_tid;
-
       if m_axi_dv = '1' then
         m_tvalid_i <= '0';
         m_tlast    <= '0';
+      end if;
+
+      if s_tvalid = '1' then
+        m_tid_i    <= s_tid;
       end if;
 
       if s_axi_dv = '1' then

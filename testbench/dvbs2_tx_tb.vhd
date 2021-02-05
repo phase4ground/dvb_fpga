@@ -21,6 +21,8 @@
 
 -- vunit: run_all_in_same_sim
 
+use std.textio.all;
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -65,13 +67,13 @@ architecture dvbs2_tx_tb of dvbs2_tx_tb is
   ---------------
   constant configs           : config_array_t := get_test_cfg(TEST_CFG);
   constant DATA_WIDTH        : integer := 8;
+  constant OUTPUT_DATA_WIDTH : integer := 32;
 
   constant BB_SCRAMBLERS_CHECKER_NAME : string  := "bb_scrambler";
   constant BCH_ENCODER_CHECKER_NAME   : string  := "bch_encoder";
   constant LDPC_ENCODER_CHECKER_NAME  : string  := "ldpc_encoder";
 
   constant CLK_PERIOD        : time := 5 ns;
-  constant ERROR_CNT_WIDTH   : integer := 8;
 
   function get_checker_data_ratio ( constant constellation : in constellation_t)
   return string is
@@ -91,10 +93,10 @@ architecture dvbs2_tx_tb of dvbs2_tx_tb is
 
   type axi_checker_t is record
     axi             : axi_stream_data_bus_t;
-    tdata_error_cnt : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-    tlast_error_cnt : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-    error_cnt       : std_logic_vector(ERROR_CNT_WIDTH - 1 downto 0);
-    expected_tdata  : std_logic_vector(DATA_WIDTH - 1 downto 0);
+    tdata_error_cnt : std_logic_vector(7 downto 0);
+    tlast_error_cnt : std_logic_vector(7 downto 0);
+    error_cnt       : std_logic_vector(7 downto 0);
+    expected_tdata  : std_logic_vector;
     expected_tlast  : std_logic;
   end record;
 
@@ -102,67 +104,44 @@ architecture dvbs2_tx_tb of dvbs2_tx_tb is
   -- Signals --
   -------------
   -- Usual ports
-  signal clk                : std_logic := '1';
-  signal rst                : std_logic;
+  signal clk                   : std_logic := '1';
+  signal rst                   : std_logic;
 
-  signal cfg_constellation  : constellation_t;
-  signal cfg_frame_type     : frame_type_t;
-  signal cfg_code_rate      : code_rate_t;
+  signal dbg_constellation     : constellation_t;
+  signal dbg_frame_type        : frame_type_t;
+  signal dbg_code_rate         : code_rate_t;
 
-  signal data_probability   : real range 0.0 to 1.0 := 1.0;
-  signal table_probability  : real range 0.0 to 1.0 := 1.0;
-  signal tready_probability : real range 0.0 to 1.0 := 1.0;
+  signal data_probability      : real range 0.0 to 1.0 := 1.0;
+  signal table_probability     : real range 0.0 to 1.0 := 1.0;
+  signal tready_probability    : real range 0.0 to 1.0 := 1.0;
 
   -- AXI input
-  signal axi_master         : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
-  signal m_data_valid       : std_logic;
+  signal axi_master            : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal m_data_valid          : std_logic;
 
   -- AXI LDPC table input
-  signal axi_ldpc           : axi_stream_data_bus_t(tdata(2*numbits(max(DVB_N_LDPC)) + 8 - 1 downto 0));
+  signal axi_ldpc              : axi_stream_data_bus_t(tdata(2*numbits(max(DVB_N_LDPC)) + 8 - 1 downto 0));
 
   -- AXI output
-  signal s_data_valid       : std_logic;
+  signal s_data_valid          : std_logic;
 
-  signal axi_bb_scrambler   : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)));
-  signal axi_bch_encoder    : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)));
-  signal axi_ldpc_encoder_core   : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)));
-  signal axi_slave          : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)));
+  signal axi_bb_scrambler      : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)), expected_tdata(DATA_WIDTH - 1 downto 0));
+  signal axi_bch_encoder       : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)), expected_tdata(DATA_WIDTH - 1 downto 0));
+  signal axi_ldpc_encoder_core : axi_checker_t(axi(tdata(DATA_WIDTH - 1 downto 0)), expected_tdata(DATA_WIDTH - 1 downto 0));
+  signal axi_slave             : axi_checker_t(axi(tdata(OUTPUT_DATA_WIDTH - 1 downto 0)), expected_tdata(OUTPUT_DATA_WIDTH - 1 downto 0));
+  signal axi_slave_tdata       : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+
+  -- Mapping RAM config
+  signal ram_wren              : std_logic;
+  signal ram_addr              : std_logic_vector(5 downto 0);
+  signal ram_wdata             : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+  signal ram_rdata             : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
 begin
 
   -------------------
   -- Port mappings --
   -------------------
-  dut : entity work.dvbs2_tx
-    generic map ( DATA_WIDTH => DATA_WIDTH )
-    port map (
-      -- Usual ports
-      clk               => clk,
-      rst               => rst,
-
-      cfg_constellation => encode(cfg_constellation),
-      cfg_frame_type    => encode(cfg_frame_type),
-      cfg_code_rate     => encode(cfg_code_rate),
-
-      -- Mapping RAM config
-      ram_wren          => '0',
-      ram_addr          => (others => 'U'),
-      ram_wdata         => (others => 'U'),
-      ram_rdata         => open,
-
-      -- AXI input
-      s_tvalid          => axi_master.tvalid,
-      s_tdata           => axi_master.tdata,
-      s_tlast           => axi_master.tlast,
-      s_tready          => axi_master.tready,
-
-      -- AXI output
-      m_tready          => axi_slave.axi.tready,
-      m_tvalid          => axi_slave.axi.tvalid,
-      m_tlast           => axi_slave.axi.tlast,
-      m_tdata           => axi_slave.axi.tdata);
-
-
   -- AXI file read
   axi_table_u : entity fpga_cores_sim.axi_file_reader
     generic map (
@@ -181,46 +160,61 @@ begin
       m_tvalid           => axi_ldpc.tvalid,
       m_tlast            => axi_ldpc.tlast);
 
-  -- AXI file read
-  axi_file_reader_block : block
-    constant CONFIG_INPUT_WIDTHS: fpga_cores.common_pkg.integer_vector_t := (
-      0 => FRAME_TYPE_WIDTH,
-      1 => CONSTELLATION_WIDTH,
-      2 => CODE_RATE_WIDTH);
+  input_stream_u : entity fpga_cores_sim.axi_file_reader
+    generic map (
+      READER_NAME => "input_stream_u",
+      DATA_WIDTH  => DATA_WIDTH,
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
+    port map (
+      -- Usual ports
+      clk                => clk,
+      rst                => rst,
+      -- Config and status
+      completed          => open,
+      tvalid_probability => data_probability,
 
-    signal m_tid : std_logic_vector(sum(CONFIG_INPUT_WIDTHS) - 1 downto 0);
-  begin
-    input_stream_u : entity fpga_cores_sim.axi_file_reader
-      generic map (
-        READER_NAME => "input_stream_u",
-        DATA_WIDTH  => DATA_WIDTH,
-        TID_WIDTH   => sum(CONFIG_INPUT_WIDTHS))
-      port map (
-        -- Usual ports
-        clk                => clk,
-        rst                => rst,
-        -- Config and status
-        completed          => open,
-        tvalid_probability => data_probability,
+      -- Data output
+      m_tready           => axi_master.tready,
+      m_tdata            => axi_master.tdata,
+      m_tid              => axi_master.tuser,
+      m_tvalid           => axi_master.tvalid,
+      m_tlast            => axi_master.tlast);
 
-        -- Data output
-        m_tready           => axi_master.tready,
-        m_tdata            => axi_master.tdata,
-        m_tid              => m_tid,
-        m_tvalid           => axi_master.tvalid,
-        m_tlast            => axi_master.tlast);
+  dut : entity work.dvbs2_tx
+    generic map (
+      DATA_WIDTH        => DATA_WIDTH,
+      OUTPUT_DATA_WIDTH => OUTPUT_DATA_WIDTH)
+    port map (
+      -- Usual ports
+      clk               => clk,
+      rst               => rst,
 
-    -- Decode the TID field with the actual config types
-    cfg_frame_type    <= decode(get_field(m_tid, 0, CONFIG_INPUT_WIDTHS));
-    cfg_constellation <= decode(get_field(m_tid, 1, CONFIG_INPUT_WIDTHS));
-    cfg_code_rate     <= decode(get_field(m_tid, 2, CONFIG_INPUT_WIDTHS));
-  end block axi_file_reader_block;
+      cfg_constellation => encode(decode(axi_master.tuser).constellation),
+      cfg_frame_type    => encode(decode(axi_master.tuser).frame_type),
+      cfg_code_rate     => encode(decode(axi_master.tuser).code_rate),
 
+      -- Mapping RAM config
+      ram_wren          => ram_wren,
+      ram_addr          => ram_addr,
+      ram_wdata         => ram_wdata,
+      ram_rdata         => ram_rdata,
+
+      -- AXI input
+      s_tvalid          => axi_master.tvalid,
+      s_tdata           => axi_master.tdata,
+      s_tlast           => axi_master.tlast,
+      s_tready          => axi_master.tready,
+
+      -- AXI output
+      m_tready          => axi_slave.axi.tready,
+      m_tvalid          => axi_slave.axi.tvalid,
+      m_tlast           => axi_slave.axi.tlast,
+      m_tdata           => axi_slave.axi.tdata);
 
   bb_scrambler_checker_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => BB_SCRAMBLERS_CHECKER_NAME,
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
       DATA_WIDTH      => DATA_WIDTH)
     port map (
@@ -244,7 +238,7 @@ begin
   bch_encoder_checker_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => BCH_ENCODER_CHECKER_NAME,
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
       DATA_WIDTH      => DATA_WIDTH)
     port map (
@@ -268,7 +262,7 @@ begin
   ldpc_encoder_checker_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => LDPC_ENCODER_CHECKER_NAME,
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
       DATA_WIDTH      => DATA_WIDTH)
     port map (
@@ -292,9 +286,9 @@ begin
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
       READER_NAME     => "axi_file_compare_u",
-      ERROR_CNT_WIDTH => ERROR_CNT_WIDTH,
+      ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
-      DATA_WIDTH      => DATA_WIDTH)
+      DATA_WIDTH      => OUTPUT_DATA_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
@@ -309,7 +303,7 @@ begin
       expected_tlast     => axi_slave.expected_tlast,
       -- Data input
       s_tready           => axi_slave.axi.tready,
-      s_tdata            => axi_slave.axi.tdata,
+      s_tdata            => axi_slave_tdata,
       s_tvalid           => axi_slave.axi.tvalid,
       s_tlast            => axi_slave.axi.tlast);
 
@@ -323,18 +317,26 @@ begin
   m_data_valid <= axi_master.tvalid and axi_master.tready;
   s_data_valid <= axi_slave.axi.tvalid and axi_slave.axi.tready;
 
+  axi_slave_tdata <= axi_slave.axi.tdata(23 downto 16) & axi_slave.axi.tdata(31 downto 24) & axi_slave.axi.tdata(7 downto 0) & axi_slave.axi.tdata(15 downto 8);
+
+  dbg_constellation <= decode(axi_master.tuser).constellation when axi_master.tvalid = '1';
+  dbg_frame_type    <= decode(axi_master.tuser).frame_type when axi_master.tvalid = '1';
+  dbg_code_rate     <= decode(axi_master.tuser).code_rate when axi_master.tvalid = '1';
+
   ---------------
   -- Processes --
   ---------------
   main : process -- {{ -----------------------------------------------------------------
-    constant self                    : actor_t       := new_actor("main");
-    variable file_reader             : file_reader_t := new_file_reader("input_stream_u");
-    variable file_checker            : file_reader_t := new_file_reader("axi_file_compare_u");
-    variable ldpc_table              : file_reader_t := new_file_reader("axi_table_u");
+    constant self                 : actor_t       := new_actor("main");
+    variable file_reader          : file_reader_t := new_file_reader("input_stream_u");
+    variable file_checker         : file_reader_t := new_file_reader("axi_file_compare_u");
+    variable ldpc_table           : file_reader_t := new_file_reader("axi_table_u");
 
-    variable bb_scrambler_checker    : file_reader_t := new_file_reader(BB_SCRAMBLERS_CHECKER_NAME);
-    variable bch_encoder_checker     : file_reader_t := new_file_reader(BCH_ENCODER_CHECKER_NAME);
-    variable ldpc_encoder_checker    : file_reader_t := new_file_reader(LDPC_ENCODER_CHECKER_NAME);
+    variable bb_scrambler_checker : file_reader_t := new_file_reader(BB_SCRAMBLERS_CHECKER_NAME);
+    variable bch_encoder_checker  : file_reader_t := new_file_reader(BCH_ENCODER_CHECKER_NAME);
+    variable ldpc_encoder_checker : file_reader_t := new_file_reader(LDPC_ENCODER_CHECKER_NAME);
+
+    variable prev_config          : config_t;
 
     procedure walk(constant steps : natural) is -- {{ ----------------------------------
     begin
@@ -357,11 +359,70 @@ begin
       walk(1);
     end procedure wait_for_completion; -- }} -------------------------------------------
 
+    procedure write_ram ( -- {{ --------------------------------------------------------
+      constant addr : in integer;
+      constant data : in std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0)) is
+    begin
+      ram_wren  <= '1';
+      ram_addr  <= std_logic_vector(to_unsigned(addr, 6));
+      ram_wdata <= data;
+      walk(1);
+      ram_wren  <= '0';
+      ram_addr  <= (others => 'U');
+      ram_wdata <= (others => 'U');
+    end procedure; -- }} ---------------------------------------------------------------
+
+    -- Write the exact value so we know data was picked up correctly without having to
+    -- convert into IQ
+    procedure update_mapping_ram ( -- {{ -----------------------------------------------
+      constant initial_addr : integer;
+      constant path         : string) is
+      file file_handler     : text;
+      variable L            : line;
+      variable r0, r1       : real;
+      variable addr         : integer := initial_addr;
+      variable index        : unsigned(5 downto 0) := (others => '0');
+    begin
+      info(sformat("Updating mapping RAM from '%s' (initial address is %d)", fo(path), fo(initial_addr)));
+
+      file_open(file_handler, path, read_mode);
+      while not endfile(file_handler) loop
+        readline(file_handler, L);
+        read(L, r0);
+        readline(file_handler, L);
+        read(L, r1);
+        info(
+          sformat(
+            "[%b] Writing RAM: %2d => %13s (%r) / %13s (%r)",
+            fo(index),
+            fo(addr),
+            real'image(r0),
+            fo(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)),
+            real'image(r1),
+            fo(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+          )
+        );
+
+        write_ram(
+          addr,
+          std_logic_vector(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)) &
+          std_logic_vector(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+        );
+        addr := addr + 1;
+        index := index + 1;
+      end loop;
+      file_close(file_handler);
+    end procedure; -- }} ---------------------------------------------------------------
+
     procedure run_test ( -- {{ ---------------------------------------------------------
       constant config           : config_t;
       constant number_of_frames : in positive) is
       variable file_reader_msg  : msg_t;
       constant data_path        : string := strip(config.base_path, chars => (1 to 1 => nul));
+      variable initial_addr     : integer := 0;
+      constant config_tuple     : config_tuple_t := (code_rate => config.code_rate,
+                                                     constellation => config.constellation,
+                                                     frame_type => config.frame_type);
     begin
 
       info("Running test with:");
@@ -369,6 +430,20 @@ begin
       info(" - frame_type     : " & frame_type_t'image(config.frame_type));
       info(" - code_rate      : " & code_rate_t'image(config.code_rate));
       info(" - data path      : " & data_path);
+
+      -- Only update the mapping RAM if the config actually requires that
+      if config /= prev_config then
+        wait_for_completion;
+        case config.constellation is
+          when mod_qpsk => initial_addr := 0;
+          when mod_8psk => initial_addr := 4;
+          when mod_16apsk => initial_addr := 12;
+          when mod_32apsk => initial_addr := 28;
+          when others => null;
+        end case;
+        update_mapping_ram(initial_addr, data_path & "/modulation_table.bin");
+        prev_config := config;
+      end if;
 
       for i in 0 to number_of_frames - 1 loop
         file_reader_msg := new_msg;
@@ -378,21 +453,24 @@ begin
           file_reader => file_reader,
           filename    => data_path & "/bb_scrambler_input.bin",
           ratio       => "1:8",
-          tid         => encode(config.code_rate) & encode(config.constellation) & encode(config.frame_type)
+          tid         => encode(config_tuple)
         );
 
-        read_file(
-          net,
-          file_checker,
-          data_path & "/bit_interleaver_output.bin",
-          get_checker_data_ratio(config.constellation)
-        );
+        -- if config.constellation /= mod_qpsk then
+        --   read_file(
+        --     net,
+        --     file_checker,
+        --     data_path & "/bit_interleaver_output.bin",
+        --     get_checker_data_ratio(config.constellation)
+        --   );
+        -- end if;
 
         read_file(net, ldpc_table, data_path & "/ldpc_table.bin");
 
         read_file(net, bb_scrambler_checker, data_path & "/bch_encoder_input.bin", "1:8");
         read_file(net, bch_encoder_checker, data_path & "/ldpc_encoder_input.bin", "1:8");
         read_file(net, ldpc_encoder_checker, data_path & "/bit_interleaver_input.bin", "1:8");
+        read_file(net, file_checker, data_path & "/bit_mapper_output_fixed.bin");
 
       end loop;
 
@@ -442,61 +520,32 @@ begin
 
 -- ghdl translate_off
   signal_spy_block : block -- {{ -------------------------------------------------------
-    type tdata_array_t is array (natural range <>) of std_logic_vector(DATA_WIDTH - 1 downto 0);
-    signal tdata         : tdata_array_t(4 downto 0);
-    signal tvalid        : std_logic_vector(4 downto 0);
-    signal tready        : std_logic_vector(4 downto 0);
-    signal tlast         : std_logic_vector(4 downto 0);
+    signal bb_scrambler_out : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+    signal bch_encoder_out  : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+    signal ldpc_encoder_out : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   begin
 
-    axi_bb_scrambler.axi.tdata     <= tdata(1);
-    axi_bb_scrambler.axi.tvalid    <= tvalid(1);
-    axi_bb_scrambler.axi.tready    <= tready(1);
-    axi_bb_scrambler.axi.tlast     <= tlast(1);
+    axi_bb_scrambler.axi.tdata     <= bb_scrambler_out.tdata;
+    axi_bb_scrambler.axi.tvalid    <= bb_scrambler_out.tvalid;
+    axi_bb_scrambler.axi.tready    <= bb_scrambler_out.tready;
+    axi_bb_scrambler.axi.tlast     <= bb_scrambler_out.tlast;
 
-    axi_bch_encoder.axi.tdata      <= tdata(2);
-    axi_bch_encoder.axi.tvalid     <= tvalid(2);
-    axi_bch_encoder.axi.tready     <= tready(2);
-    axi_bch_encoder.axi.tlast      <= tlast(2);
+    axi_bch_encoder.axi.tdata      <= bch_encoder_out.tdata;
+    axi_bch_encoder.axi.tvalid     <= bch_encoder_out.tvalid;
+    axi_bch_encoder.axi.tready     <= bch_encoder_out.tready;
+    axi_bch_encoder.axi.tlast      <= bch_encoder_out.tlast;
 
-    axi_ldpc_encoder_core.axi.tdata     <= tdata(3);
-    axi_ldpc_encoder_core.axi.tvalid    <= tvalid(3);
-    axi_ldpc_encoder_core.axi.tready    <= tready(3);
-    axi_ldpc_encoder_core.axi.tlast     <= tlast(3);
+    axi_ldpc_encoder_core.axi.tdata     <= ldpc_encoder_out.tdata;
+    axi_ldpc_encoder_core.axi.tvalid    <= ldpc_encoder_out.tvalid;
+    axi_ldpc_encoder_core.axi.tready    <= ldpc_encoder_out.tready;
+    axi_ldpc_encoder_core.axi.tlast     <= ldpc_encoder_out.tlast;
 
     process
     begin
-      init_signal_spy("/dvbs2_tx_tb/dut/tdata",  "/dvbs2_tx_tb/signal_spy_block/tdata",  0);
-      init_signal_spy("/dvbs2_tx_tb/dut/tvalid", "/dvbs2_tx_tb/signal_spy_block/tvalid", 0);
-      init_signal_spy("/dvbs2_tx_tb/dut/tlast",  "/dvbs2_tx_tb/signal_spy_block/tlast",  0);
-      init_signal_spy("/dvbs2_tx_tb/dut/tready", "/dvbs2_tx_tb/signal_spy_block/tready", 0);
+      init_signal_spy("/dvbs2_tx_tb/dut/bb_scrambler_out",  "/dvbs2_tx_tb/signal_spy_block/bb_scrambler_out",  0);
+      init_signal_spy("/dvbs2_tx_tb/dut/bch_encoder_out", "/dvbs2_tx_tb/signal_spy_block/bch_encoder_out", 0);
+      init_signal_spy("/dvbs2_tx_tb/dut/ldpc_encoder_out",  "/dvbs2_tx_tb/signal_spy_block/ldpc_encoder_out",  0);
       wait;
-    end process;
-
-    check_no_axi_undefined_p: process(clk)
-      function get_stage_name ( constant index : natural range 1 to 4 ) return string is
-      begin
-        case index is
-          when 1 => return "baseband scrambler";
-          when 2 => return "BCH encoder";
-          when 3 => return "LDPC encoder";
-          when others => null;
-        end case;
-
-        return "bit interleaver";
-
-      end;
-
-    begin
-      if rising_edge(clk) then
-        for i in 1 to 4 loop
-
-          if tvalid(i) = '1' and tready(i) = '1' and tdata(i) /= to_01(tdata(i)) then
-            warning(sformat("'%s' (%d) has undefined AXI data", get_stage_name(i), fo(i)));
-          end if;
-
-        end loop;
-      end if;
     end process;
   end block signal_spy_block; -- }} ----------------------------------------------------
 -- ghdl translate_on

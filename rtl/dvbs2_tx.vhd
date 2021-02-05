@@ -25,6 +25,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 
 library fpga_cores;
+use fpga_cores.axi_pkg.all;
 use fpga_cores.common_pkg.all;
 
 use work.dvb_utils_pkg.all;
@@ -35,7 +36,7 @@ use work.dvb_utils_pkg.all;
 entity dvbs2_tx is
   generic (
     DATA_WIDTH        : positive := 8;
-    OUTPUT_DATA_WIDTH : positive := 8
+    OUTPUT_DATA_WIDTH : positive := 32
   );
   port (
     -- Usual ports
@@ -62,7 +63,7 @@ entity dvbs2_tx is
     m_tready          : in  std_logic;
     m_tvalid          : out std_logic;
     m_tlast           : out std_logic;
-    m_tdata           : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    m_tdata           : out std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0));
 end dvbs2_tx;
 
 architecture dvbs2_tx of dvbs2_tx is
@@ -70,7 +71,6 @@ architecture dvbs2_tx of dvbs2_tx is
   ---------------
   -- Constants --
   ---------------
-  constant CHAIN_LENGTH         : positive := 7;
 
   -----------
   -- Types --
@@ -80,17 +80,18 @@ architecture dvbs2_tx of dvbs2_tx is
   -------------
   -- Signals --
   -------------
-  signal config        : std_logic_array_t(CHAIN_LENGTH - 1 downto 0)(ENCODED_CONFIG_WIDTH - 1 downto 0);
-  signal frame_type    : frame_type_array_t(CHAIN_LENGTH - 1 downto 0);
-  signal constellation : constellation_array_t(CHAIN_LENGTH - 1 downto 0);
-  signal code_rate     : code_rate_array_t(CHAIN_LENGTH - 1 downto 0);
-
-  signal tdata         : tdata_array_t(CHAIN_LENGTH - 1 downto 0);
-  signal tvalid        : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
-  signal tready        : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
-  signal tlast         : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
+  signal s_tid         : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
 
   signal mux_sel       : std_logic_vector(1 downto 0);
+
+  signal bb_scrambler_out         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal bch_encoder_out          : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal ldpc_encoder_out         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal mux_to_bit_interleaver   : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
+  signal mux_bypass               : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
+  signal bit_interleaver_out      : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal constellation_mapper_in  : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal constellation_mapper_out : axi_stream_bus_t(tdata(OUTPUT_DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
 
 begin
 
@@ -107,18 +108,18 @@ begin
       rst      => rst,
 
       -- AXI input
-      s_tvalid => tvalid(0),
-      s_tdata  => tdata(0),
-      s_tlast  => tlast(0),
-      s_tready => tready(0),
-      s_tid    => config(0),
+      s_tvalid => s_tvalid,
+      s_tdata  => s_tdata,
+      s_tlast  => s_tlast,
+      s_tready => s_tready,
+      s_tid    => s_tid,
 
       -- AXI output
-      m_tready => tready(1),
-      m_tvalid => tvalid(1),
-      m_tlast  => tlast(1),
-      m_tdata  => tdata(1),
-      m_tid    => config(1));
+      m_tready => bb_scrambler_out.tready,
+      m_tvalid => bb_scrambler_out.tvalid,
+      m_tlast  => bb_scrambler_out.tlast,
+      m_tdata  => bb_scrambler_out.tdata,
+      m_tid    => bb_scrambler_out.tuser);
 
   bch_encoder_u : entity work.axi_bch_encoder
     generic map (
@@ -129,22 +130,22 @@ begin
       clk            => clk,
       rst            => rst,
 
-      cfg_frame_type => decode(config(1)).frame_type,
-      cfg_code_rate  => decode(config(1)).code_rate,
+      cfg_frame_type => decode(bb_scrambler_out.tuser).frame_type,
+      cfg_code_rate  => decode(bb_scrambler_out.tuser).code_rate,
 
       -- AXI input
-      s_tvalid       => tvalid(1),
-      s_tdata        => tdata(1),
-      s_tlast        => tlast(1),
-      s_tready       => tready(1),
-      s_tid          => config(1),
+      s_tvalid       => bb_scrambler_out.tvalid,
+      s_tlast        => bb_scrambler_out.tlast,
+      s_tready       => bb_scrambler_out.tready,
+      s_tdata        => bb_scrambler_out.tdata,
+      s_tid          => bb_scrambler_out.tuser,
 
       -- AXI output
-      m_tready       => tready(2),
-      m_tvalid       => tvalid(2),
-      m_tlast        => tlast(2),
-      m_tdata        => tdata(2),
-      m_tid          => config(2));
+      m_tready       => bch_encoder_out.tready,
+      m_tvalid       => bch_encoder_out.tvalid,
+      m_tlast        => bch_encoder_out.tlast,
+      m_tdata        => bch_encoder_out.tdata,
+      m_tid          => bch_encoder_out.tuser);
 
   ldpc_encoder_u : entity work.axi_ldpc_encoder
     generic map ( TID_WIDTH   => ENCODED_CONFIG_WIDTH )
@@ -153,41 +154,44 @@ begin
       clk               => clk,
       rst               => rst,
 
-      cfg_frame_type    => decode(config(2)).frame_type,
-      cfg_code_rate     => decode(config(2)).code_rate,
-      cfg_constellation => decode(config(2)).constellation,
+      cfg_frame_type    => decode(bch_encoder_out.tuser).frame_type,
+      cfg_code_rate     => decode(bch_encoder_out.tuser).code_rate,
+      cfg_constellation => decode(bch_encoder_out.tuser).constellation,
 
       -- AXI input
-      s_tvalid          => tvalid(2),
-      s_tlast           => tlast(2),
-      s_tready          => tready(2),
-      s_tdata           => tdata(2),
-      s_tid             => config(2),
+      s_tready          => bch_encoder_out.tready,
+      s_tvalid          => bch_encoder_out.tvalid,
+      s_tlast           => bch_encoder_out.tlast,
+      s_tdata           => bch_encoder_out.tdata,
+      s_tid             => bch_encoder_out.tuser,
 
       -- AXI output
-      m_tready          => tready(3),
-      m_tvalid          => tvalid(3),
-      m_tlast           => tlast(3),
-      m_tdata           => tdata(3),
-      m_tid             => config(3));
+      m_tready          => ldpc_encoder_out.tready,
+      m_tvalid          => ldpc_encoder_out.tvalid,
+      m_tlast           => ldpc_encoder_out.tlast,
+      m_tdata           => ldpc_encoder_out.tdata,
+      m_tid             => ldpc_encoder_out.tuser);
 
-  
+
   -- Bit interleaver is not needed for QPSK
-  bit_interleaver_mux_u : entity fpga_cores.axi_stream_demux
+  bit_interleaver_demux_u : entity fpga_cores.axi_stream_demux
     generic map (
       INTERFACES => 2,
-      DATA_WIDTH => 0)
+      DATA_WIDTH => DATA_WIDTH)
     port map (
       selection_mask => mux_sel,
 
-      s_tvalid       => tvalid(3),
-      s_tready       => tready(3),
+      s_tvalid       => ldpc_encoder_out.tvalid,
+      s_tready       => ldpc_encoder_out.tready,
+      s_tdata        => ldpc_encoder_out.tdata,
 
-      m_tvalid(0)    => tvalid(4),
-      m_tvalid(1)    => tvalid(5),
+      m_tvalid(0)    => mux_to_bit_interleaver.tvalid,
+      m_tvalid(1)    => mux_bypass.tvalid,
 
-      m_tready(0)    => tready(4),
-      m_tready(1)    => tready(5));
+      m_tready(0)    => mux_to_bit_interleaver.tready,
+      m_tready(1)    => mux_bypass.tready,
+
+      m_tdata        => open);
 
   bit_interleaver_u : entity work.axi_bit_interleaver
     generic map (
@@ -199,23 +203,23 @@ begin
       clk               => clk,
       rst               => rst,
 
-      cfg_frame_type    => decode(config(3)).frame_type,
-      cfg_constellation => decode(config(3)).constellation,
-      cfg_code_rate     => decode(config(3)).code_rate,
+      cfg_frame_type    => decode(ldpc_encoder_out.tuser).frame_type,
+      cfg_constellation => decode(ldpc_encoder_out.tuser).constellation,
+      cfg_code_rate     => decode(ldpc_encoder_out.tuser).code_rate,
 
       -- AXI input
-      s_tvalid          => tvalid(4),
-      s_tlast           => tlast(3),
-      s_tready          => tready(4),
-      s_tdata           => tdata(3),
-      s_tid             => config(3),
+      s_tready          => mux_to_bit_interleaver.tready,
+      s_tvalid          => mux_to_bit_interleaver.tvalid,
+      s_tlast           => ldpc_encoder_out.tlast,
+      s_tdata           => ldpc_encoder_out.tdata,
+      s_tid             => ldpc_encoder_out.tuser,
 
       -- AXI output
-      m_tready          => tready(5),
-      m_tvalid          => tvalid(5),
-      m_tlast           => tlast(5),
-      m_tdata           => tdata(5),
-      m_tid             => config(5));
+      m_tready          => bit_interleaver_out.tready,
+      m_tvalid          => bit_interleaver_out.tvalid,
+      m_tlast           => bit_interleaver_out.tlast,
+      m_tdata           => bit_interleaver_out.tdata,
+      m_tid             => bit_interleaver_out.tuser);
 
   pre_constellaion_mapper_arbiter_block : block
     signal tdata_in0 : std_logic_vector(DATA_WIDTH + ENCODED_CONFIG_WIDTH - 1 downto 0);
@@ -223,11 +227,11 @@ begin
     signal tdata_out : std_logic_vector(DATA_WIDTH + ENCODED_CONFIG_WIDTH - 1 downto 0);
   begin
 
-    tdata_in0 <= config(4) & tdata(4);
-    tdata_in1 <= config(5) & tdata(5);
+    tdata_in0 <= ldpc_encoder_out.tuser & ldpc_encoder_out.tdata;
+    tdata_in1 <= bit_interleaver_out.tuser & bit_interleaver_out.tdata;
 
-    tdata(6)  <= tdata_out(DATA_WIDTH - 1 downto 0);
-    config(6) <= tdata_out(ENCODED_CONFIG_WIDTH + DATA_WIDTH - 1 downto DATA_WIDTH);
+    constellation_mapper_in.tdata <= tdata_out(DATA_WIDTH - 1 downto 0);
+    constellation_mapper_in.tuser <= tdata_out(ENCODED_CONFIG_WIDTH + DATA_WIDTH - 1 downto DATA_WIDTH);
 
     -- Merge LDPC encoder and bit interleaver streams to feed into the constellation mapper
     pre_constellaion_mapper_arbiter_u : entity fpga_cores.axi_stream_arbiter
@@ -244,23 +248,29 @@ begin
         selected_encoded => open,
 
         -- AXI slave input
-        s_tvalid         => (0 => tvalid(4), 1 => tvalid(5)),
-        s_tready(0)      => tready(0),
-        s_tready(1)      => tready(1),
-        s_tlast          => (0 => tlast(4), 1 => tlast(5)),
-        s_tdata          => (0 => tdata_in0, 1 => tdata_in1),
+        s_tvalid(0)      => mux_bypass.tvalid,
+        s_tvalid(1)      => bit_interleaver_out.tvalid,
+
+        s_tready(0)      => mux_bypass.tready,
+        s_tready(1)      => bit_interleaver_out.tready,
+
+        s_tlast(0)       => ldpc_encoder_out.tlast,
+        s_tlast(1)       => bit_interleaver_out.tlast,
+
+        s_tdata(0)       => tdata_in0,
+        s_tdata(1)       => tdata_in1,
 
         -- AXI master output
-        m_tvalid         => tvalid(6),
-        m_tready         => tready(6),
+        m_tvalid         => constellation_mapper_in.tvalid,
+        m_tready         => constellation_mapper_in.tready,
         m_tdata          => tdata_out,
-        m_tlast          => tlast(6));
+        m_tlast          => constellation_mapper_in.tlast);
   end block;
 
   constellation_mapper_u : entity work.axi_constellation_mapper
     generic map (
       INPUT_DATA_WIDTH  => DATA_WIDTH,
-      OUTPUT_DATA_WIDTH => 32
+      OUTPUT_DATA_WIDTH => OUTPUT_DATA_WIDTH
     )
     port map (
       -- Usual ports
@@ -273,50 +283,39 @@ begin
       ram_wdata         => ram_wdata,
       ram_rdata         => ram_rdata,
 
-      cfg_frame_type    => decode(config(6)).frame_type,
-      cfg_constellation => decode(config(6)).constellation,
-      cfg_code_rate     => decode(config(6)).code_rate,
+      cfg_frame_type    => decode(constellation_mapper_in.tuser).frame_type,
+      cfg_constellation => decode(constellation_mapper_in.tuser).constellation,
+      cfg_code_rate     => decode(constellation_mapper_in.tuser).code_rate,
 
       -- AXI input
-      s_tvalid          => tvalid(6),
-      s_tlast           => tlast(6),
-      s_tready          => tready(6),
-      s_tdata           => tdata(6),
-      -- s_tid             => config(6),
+      s_tvalid          => constellation_mapper_in.tvalid,
+      s_tlast           => constellation_mapper_in.tlast,
+      s_tready          => constellation_mapper_in.tready,
+      -- s_tid             constellation_mapper_in.tuser,
+      s_tdata           => constellation_mapper_in.tdata,
 
       -- AXI output
-      m_tready          => tready(6),
-      m_tvalid          => tvalid(6),
-      m_tlast           => tlast(6),
-      -- m_tid             => config(6),
-      m_tdata           => tdata(6));
+      m_tvalid          => constellation_mapper_out.tvalid,
+      m_tlast           => constellation_mapper_out.tlast,
+      m_tready          => constellation_mapper_out.tready,
+      -- m_tid             constellation_mapper_in.tuser,
+      m_tdata           => constellation_mapper_out.tdata);
 
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
-  constellation(0) <= decode(cfg_constellation);
-  frame_type(0)    <= decode(cfg_frame_type);
-  code_rate(0)     <= decode(cfg_code_rate);
+  s_tid <= encode((frame_type    => decode(cfg_frame_type),
+                   constellation => decode(cfg_constellation),
+                   code_rate     => decode(cfg_code_rate)));
 
-  config(0) <= encode((frame_type    => decode(cfg_frame_type), 
-                       constellation => decode(cfg_constellation),
-                       code_rate     => decode(cfg_code_rate)));
+  mux_sel <= "10" when decode(ldpc_encoder_out.tuser).constellation = mod_qpsk else "01";
 
-  tvalid(0)        <= s_tvalid;
-  tdata(0)         <= s_tdata;
-  tlast(0)         <= s_tlast;
-  s_tready         <= tready(0);
-
-  m_tvalid                 <= tvalid(CHAIN_LENGTH - 1);
-  m_tdata                  <= tdata(CHAIN_LENGTH - 1);
-  m_tlast                  <= tlast(CHAIN_LENGTH - 1);
-  tready(CHAIN_LENGTH - 1) <= m_tready;
-
-  mux_sel <= "01" when decode(config(3)).constellation = mod_qpsk else "10";
+  constellation_mapper_out.tready <= m_tready;
+  m_tvalid                        <= constellation_mapper_out.tvalid;
+  m_tlast                         <= constellation_mapper_out.tlast;
+  m_tdata                         <= constellation_mapper_out.tdata;
 
   ---------------
   -- Processes --
   ---------------
-
-
 end dvbs2_tx;

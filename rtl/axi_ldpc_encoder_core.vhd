@@ -92,7 +92,7 @@ architecture axi_ldpc_encoder_core of axi_ldpc_encoder_core is
   signal axi_ldpc_dv             : std_logic;
 
   signal axi_passthrough         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(TID_WIDTH - 1 downto 0));
-  signal m_tid_reg               : std_logic_vector(TID_WIDTH - 1 downto 0);
+  signal m_tvalid_i              : std_logic;
 
   signal axi_bit                 : axi_stream_data_bus_t(tdata(0 downto 0));
   signal dbg_axi_bit_cnt         : unsigned(s_ldpc_tuser'length - 1 downto 0) := (others => '0');
@@ -166,6 +166,7 @@ architecture axi_ldpc_encoder_core of axi_ldpc_encoder_core is
   signal forward_encoded_data    : std_logic;
 
   signal axi_out                 : axi_stream_data_bus_t(tdata(DATA_WIDTH - 1 downto 0));
+  signal m_tid_reg               : std_logic_vector(TID_WIDTH - 1 downto 0);
 
   signal frame_bit_index_i       : natural range 0 to ROM_DATA_WIDTH - 1;
   signal s_ldpc_tready_i         : std_logic;
@@ -389,7 +390,7 @@ begin
   m_tdata                <= axi_passthrough.tdata when forward_encoded_data = '0' else
                             mirror_bits(axi_out.tdata);
 
-  m_tvalid               <= (axi_passthrough.tvalid and axi_passthrough.tready and not forward_encoded_data)
+  m_tvalid_i             <= (axi_passthrough.tvalid and axi_passthrough.tready and not forward_encoded_data)
                              or axi_out.tvalid;
 
   m_tid                  <= (axi_passthrough.tuser and (TID_WIDTH - 1 downto 0 => not forward_encoded_data)) or
@@ -408,6 +409,7 @@ begin
                    "11";
 
   s_ldpc_tready <= s_ldpc_tready_i;
+  m_tvalid      <= m_tvalid_i;
 
   -- synthesis translate_off
   assert not (rising_edge(clk) and frame_in_last = '1' and frame_in_mask = "00");
@@ -686,7 +688,6 @@ begin
 
       if axi_out.tvalid = '1' and axi_out.tready = '1' and axi_out.tlast = '1' then
         forward_encoded_data <= '0';
-        m_tid_reg            <= (others => 'U');
       end if;
 
       -- AXI input data that was converted to 1 bit needs to be synchronized properly with
