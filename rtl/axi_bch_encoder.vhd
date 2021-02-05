@@ -80,9 +80,11 @@ architecture axi_bch_encoder of axi_bch_encoder is
   signal cfg_code_rate_out    : code_rate_t;
 
   signal s_axi_first_word     : std_logic;
+  signal tid_reg              : std_logic_vector(TID_WIDTH - 1 downto 0);
 
   signal axi_delay_tvalid     : std_logic;
   signal axi_delay_tdata      : std_logic_vector(TDATA_WIDTH - 1 downto 0);
+  signal axi_delay_tid        : std_logic_vector(TID_WIDTH - 1 downto 0);
   signal axi_delay_tlast      : std_logic;
   signal axi_delay_tready     : std_logic;
 
@@ -111,18 +113,19 @@ begin
   -- Delay the incoming data to match the BCH calculation delay so we can switch to
   -- appending without any bubbles
   data_delay_block : block
-    signal tdata_agg_in  : std_logic_vector(TDATA_WIDTH downto 0);
-    signal tdata_agg_out : std_logic_vector(TDATA_WIDTH downto 0);
+    signal tdata_agg_in  : std_logic_vector(TID_WIDTH + TDATA_WIDTH downto 0);
+    signal tdata_agg_out : std_logic_vector(TID_WIDTH + TDATA_WIDTH downto 0);
   begin
-    tdata_agg_in    <= s_tlast & s_tdata;
+    tdata_agg_in    <= s_tlast & s_tid & s_tdata;
 
     axi_delay_tdata <= tdata_agg_out(TDATA_WIDTH - 1 downto 0);
-    axi_delay_tlast <= tdata_agg_out(TDATA_WIDTH);
+    axi_delay_tid   <= tdata_agg_out(TID_WIDTH + TDATA_WIDTH - 1 downto TDATA_WIDTH);
+    axi_delay_tlast <= tdata_agg_out(TID_WIDTH + TDATA_WIDTH);
 
     data_delay_u : entity fpga_cores.axi_stream_delay
       generic map (
         DELAY_CYCLES => 2,
-        TDATA_WIDTH  => TDATA_WIDTH + 1)
+        TDATA_WIDTH  => tdata_agg_in'length)
       port map (
         -- Usual ports
         clk     => clk,
@@ -188,6 +191,11 @@ begin
                       axi_delay_tdata when crc_word_cnt = 0 else
                       crc_srl(crc_srl'length - 1 downto crc_srl'length - TDATA_WIDTH);
 
+  -- Use axi_delay_tid when passing data through and tid_reg when appending the CRC
+  m_tid            <= (others => 'U') when m_tvalid_i = '0' else
+                      (tid_reg       and     (m_tid'range => or(crc_word_cnt))) or
+                      (axi_delay_tid and not (m_tid'range => or(crc_word_cnt)));
+
   m_tlast_i        <= '1' when crc_word_cnt = 1 else '0';
 
   ---------------
@@ -209,11 +217,15 @@ begin
       crc_sample       <= '0';
       crc_sample_delay <= crc_sample;
 
-      if m_axi_data_valid = '1' and crc_word_cnt /= 0 then
-        -- Shift the CRC, tdata will be assigned to the MSB
-        crc_srl      <= crc_srl(crc_srl'length - TDATA_WIDTH - 1 downto 0)
-                        & (TDATA_WIDTH - 1 downto 0 => 'U');
-        crc_word_cnt <= crc_word_cnt - 1;
+      if m_axi_data_valid = '1' then
+        if crc_word_cnt = 0 then
+          tid_reg <= axi_delay_tid;
+        else
+          -- Shift the CRC, tdata will be assigned to the MSB
+          crc_srl      <= crc_srl(crc_srl'length - TDATA_WIDTH - 1 downto 0)
+                          & (TDATA_WIDTH - 1 downto 0 => 'U');
+          crc_word_cnt <= crc_word_cnt - 1;
+        end if;
       end if;
 
       if s_axi_data_valid = '1' then
@@ -269,13 +281,10 @@ begin
     signal frame_type_ff : frame_type_t;
     signal code_rate_ff  : code_rate_t;
     signal first_word    : std_logic;
-    signal tid_reg       : std_logic_vector(TID_WIDTH - 1 downto 0);
   begin
 
     frame_type <= cfg_frame_type when first_word = '1' and s_axi_data_valid = '1' else frame_type_ff;
     code_rate  <= cfg_code_rate when first_word = '1' and s_axi_data_valid = '1' else code_rate_ff;
-
-    m_tid      <= tid_reg when m_tvalid_i = '1' else (others => 'U');
 
     process(clk)
     begin
@@ -285,7 +294,6 @@ begin
 
           -- Sample the BCH code used on the first word
           if first_word = '1' then
-            tid_reg       <= s_tid;
             frame_type_ff <= cfg_frame_type;
             code_rate_ff  <= cfg_code_rate;
           end if;

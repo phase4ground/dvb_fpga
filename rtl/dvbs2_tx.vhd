@@ -33,7 +33,10 @@ use work.dvb_utils_pkg.all;
 -- Entity declaration --
 ------------------------
 entity dvbs2_tx is
-  generic (DATA_WIDTH : positive := 8);
+  generic (
+    DATA_WIDTH        : positive := 8;
+    OUTPUT_DATA_WIDTH : positive := 8
+  );
   port (
     -- Usual ports
     clk               : in  std_logic;
@@ -42,6 +45,12 @@ entity dvbs2_tx is
     cfg_constellation : in  std_logic_vector(CONSTELLATION_WIDTH - 1 downto 0);
     cfg_frame_type    : in  std_logic_vector(FRAME_TYPE_WIDTH - 1 downto 0);
     cfg_code_rate     : in  std_logic_vector(CODE_RATE_WIDTH - 1 downto 0);
+
+    -- Mapping RAM config
+    ram_wren          : in  std_logic;
+    ram_addr          : in  std_logic_vector(5 downto 0);
+    ram_wdata         : in  std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+    ram_rdata         : out std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
     -- AXI input
     s_tvalid          : in  std_logic;
@@ -61,7 +70,7 @@ architecture dvbs2_tx of dvbs2_tx is
   ---------------
   -- Constants --
   ---------------
-  constant CHAIN_LENGTH         : positive := 5;
+  constant CHAIN_LENGTH         : positive := 7;
 
   -----------
   -- Types --
@@ -81,10 +90,7 @@ architecture dvbs2_tx of dvbs2_tx is
   signal tready        : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
   signal tlast         : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
 
-  signal axi_dv        : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
-
-  signal cfg_sample_en : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
-  signal first_word    : std_logic_vector(CHAIN_LENGTH - 1 downto 0);
+  signal mux_sel       : std_logic_vector(1 downto 0);
 
 begin
 
@@ -141,6 +147,7 @@ begin
       m_tid          => config(2));
 
   ldpc_encoder_u : entity work.axi_ldpc_encoder
+    generic map ( TID_WIDTH   => ENCODED_CONFIG_WIDTH )
     port map (
       -- Usual ports
       clk               => clk,
@@ -152,69 +159,141 @@ begin
 
       -- AXI input
       s_tvalid          => tvalid(2),
-      s_tdata           => tdata(2),
       s_tlast           => tlast(2),
       s_tready          => tready(2),
+      s_tdata           => tdata(2),
+      s_tid             => config(2),
 
       -- AXI output
       m_tready          => tready(3),
       m_tvalid          => tvalid(3),
       m_tlast           => tlast(3),
-      m_tdata           => tdata(3));
+      m_tdata           => tdata(3),
+      m_tid             => config(3));
 
-  -- QPSK doesn't go through interleaving at all
-  bit_interleaver_config_fifo_u : entity work.config_fifo
-    generic map ( FIFO_DEPTH => 4 )
+  
+  -- Bit interleaver is not needed for QPSK
+  bit_interleaver_mux_u : entity fpga_cores.axi_stream_demux
+    generic map (
+      INTERFACES => 2,
+      DATA_WIDTH => 0)
     port map (
-      -- Usual ports
-      clk             => clk,
-      rst             => rst,
+      selection_mask => mux_sel,
 
-      -- Write side
-      wr_en           => cfg_sample_en(2),
-      full            => open,
-      constellation_i => constellation(2),
-      frame_type_i    => frame_type(2),
-      code_rate_i     => code_rate(2),
+      s_tvalid       => tvalid(3),
+      s_tready       => tready(3),
 
-      -- Read side
-      rd_en           => cfg_sample_en(3),
-      empty           => open,
-      constellation_o => constellation(3),
-      frame_type_o    => frame_type(3),
-      code_rate_o     => code_rate(3));
+      m_tvalid(0)    => tvalid(4),
+      m_tvalid(1)    => tvalid(5),
+
+      m_tready(0)    => tready(4),
+      m_tready(1)    => tready(5));
 
   bit_interleaver_u : entity work.axi_bit_interleaver
-    generic map (DATA_WIDTH => DATA_WIDTH)
+    generic map (
+      TDATA_WIDTH => DATA_WIDTH,
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH
+    )
     port map (
       -- Usual ports
       clk               => clk,
       rst               => rst,
 
-      cfg_frame_type    => frame_type(3),
-      cfg_constellation => constellation(3),
-      cfg_code_rate     => code_rate(3),
+      cfg_frame_type    => decode(config(3)).frame_type,
+      cfg_constellation => decode(config(3)).constellation,
+      cfg_code_rate     => decode(config(3)).code_rate,
 
       -- AXI input
-      s_tvalid          => tvalid(3),
-      s_tdata           => tdata(3),
+      s_tvalid          => tvalid(4),
       s_tlast           => tlast(3),
-      s_tready          => tready(3),
+      s_tready          => tready(4),
+      s_tdata           => tdata(3),
+      s_tid             => config(3),
 
       -- AXI output
-      m_tready          => tready(4),
-      m_tvalid          => tvalid(4),
-      m_tlast           => tlast(4),
-      m_tdata           => tdata(4));
+      m_tready          => tready(5),
+      m_tvalid          => tvalid(5),
+      m_tlast           => tlast(5),
+      m_tdata           => tdata(5),
+      m_tid             => config(5));
+
+  pre_constellaion_mapper_arbiter_block : block
+    signal tdata_in0 : std_logic_vector(DATA_WIDTH + ENCODED_CONFIG_WIDTH - 1 downto 0);
+    signal tdata_in1 : std_logic_vector(DATA_WIDTH + ENCODED_CONFIG_WIDTH - 1 downto 0);
+    signal tdata_out : std_logic_vector(DATA_WIDTH + ENCODED_CONFIG_WIDTH - 1 downto 0);
+  begin
+
+    tdata_in0 <= config(4) & tdata(4);
+    tdata_in1 <= config(5) & tdata(5);
+
+    tdata(6)  <= tdata_out(DATA_WIDTH - 1 downto 0);
+    config(6) <= tdata_out(ENCODED_CONFIG_WIDTH + DATA_WIDTH - 1 downto DATA_WIDTH);
+
+    -- Merge LDPC encoder and bit interleaver streams to feed into the constellation mapper
+    pre_constellaion_mapper_arbiter_u : entity fpga_cores.axi_stream_arbiter
+      generic map (
+        MODE       => "ROUND_ROBIN", -- ROUND_ROBIN, INTERLEAVED, ABSOLUTE
+        INTERFACES => 2,
+        DATA_WIDTH => DATA_WIDTH + ENCODED_CONFIG_WIDTH)
+      port map (
+        -- Usual ports
+        clk              => clk,
+        rst              => rst,
+
+        selected         => open,
+        selected_encoded => open,
+
+        -- AXI slave input
+        s_tvalid         => (0 => tvalid(4), 1 => tvalid(5)),
+        s_tready(0)      => tready(0),
+        s_tready(1)      => tready(1),
+        s_tlast          => (0 => tlast(4), 1 => tlast(5)),
+        s_tdata          => (0 => tdata_in0, 1 => tdata_in1),
+
+        -- AXI master output
+        m_tvalid         => tvalid(6),
+        m_tready         => tready(6),
+        m_tdata          => tdata_out,
+        m_tlast          => tlast(6));
+  end block;
+
+  constellation_mapper_u : entity work.axi_constellation_mapper
+    generic map (
+      INPUT_DATA_WIDTH  => DATA_WIDTH,
+      OUTPUT_DATA_WIDTH => 32
+    )
+    port map (
+      -- Usual ports
+      clk               => clk,
+      rst               => rst,
+
+      -- Mapping RAM config
+      ram_wren          => ram_wren,
+      ram_addr          => ram_addr,
+      ram_wdata         => ram_wdata,
+      ram_rdata         => ram_rdata,
+
+      cfg_frame_type    => decode(config(6)).frame_type,
+      cfg_constellation => decode(config(6)).constellation,
+      cfg_code_rate     => decode(config(6)).code_rate,
+
+      -- AXI input
+      s_tvalid          => tvalid(6),
+      s_tlast           => tlast(6),
+      s_tready          => tready(6),
+      s_tdata           => tdata(6),
+      -- s_tid             => config(6),
+
+      -- AXI output
+      m_tready          => tready(6),
+      m_tvalid          => tvalid(6),
+      m_tlast           => tlast(6),
+      -- m_tid             => config(6),
+      m_tdata           => tdata(6));
 
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
-  g_axi_data_valid : for i in 0 to CHAIN_LENGTH - 1 generate
-    axi_dv(i)        <= '1' when tready(i) = '1' and tvalid(i) = '1' else '0';
-    cfg_sample_en(i) <= axi_dv(i) and first_word(i);
-  end generate;
-
   constellation(0) <= decode(cfg_constellation);
   frame_type(0)    <= decode(cfg_frame_type);
   code_rate(0)     <= decode(cfg_code_rate);
@@ -233,21 +312,11 @@ begin
   m_tlast                  <= tlast(CHAIN_LENGTH - 1);
   tready(CHAIN_LENGTH - 1) <= m_tready;
 
+  mux_sel <= "01" when decode(config(3)).constellation = mod_qpsk else "10";
+
   ---------------
   -- Processes --
   ---------------
-  process(clk, rst)
-  begin
-    if rst = '1' then
-      first_word  <= (others => '1');
-    elsif rising_edge(clk) then
-      for i in 0 to CHAIN_LENGTH - 1 loop
-        if axi_dv(i) = '1' then
-          first_word(i) <= tlast(i);
-        end if;
-      end loop;
-    end if;
-  end process;
 
 
 end dvbs2_tx;

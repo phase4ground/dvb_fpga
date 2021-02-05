@@ -144,6 +144,12 @@ begin
       cfg_frame_type    => encode(cfg_frame_type),
       cfg_code_rate     => encode(cfg_code_rate),
 
+      -- Mapping RAM config
+      ram_wren          => '0',
+      ram_addr          => (others => 'U'),
+      ram_wdata         => (others => 'U'),
+      ram_rdata         => open,
+
       -- AXI input
       s_tvalid          => axi_master.tvalid,
       s_tdata           => axi_master.tdata,

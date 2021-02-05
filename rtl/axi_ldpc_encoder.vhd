@@ -36,6 +36,7 @@ use work.ldpc_pkg.all;
 -- Entity declaration --
 ------------------------
 entity axi_ldpc_encoder is
+  generic ( TID_WIDTH : integer := 0 );
   port (
     -- Usual ports
     clk               : in  std_logic;
@@ -48,14 +49,16 @@ entity axi_ldpc_encoder is
     -- AXI data input
     s_tready          : out std_logic;
     s_tvalid          : in  std_logic;
-    s_tdata           : in  std_logic_vector(7 downto 0);
     s_tlast           : in  std_logic;
+    s_tdata           : in  std_logic_vector(7 downto 0);
+    s_tid             : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready          : in  std_logic;
     m_tvalid          : out std_logic;
     m_tlast           : out std_logic;
-    m_tdata           : out std_logic_vector(7 downto 0));
+    m_tdata           : out std_logic_vector(7 downto 0);
+    m_tid             : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_ldpc_encoder;
 
 architecture axi_ldpc_encoder of axi_ldpc_encoder is
@@ -120,14 +123,16 @@ begin
       -- AXI data input
       s_tready           => s_tready_i,
       s_tvalid           => s_tvalid,
-      s_tdata            => s_tdata,
       s_tlast            => s_tlast,
+      s_tdata            => s_tdata,
+      s_tid              => s_tid,
 
       -- AXI output
       m_tready           => m_tready,
       m_tvalid           => m_tvalid,
       m_tlast            => m_tlast,
-      m_tdata            => m_tdata);
+      m_tdata            => m_tdata,
+      m_tid              => m_tid);
 
   ------------------------------
   -- Asynchronous assignments --

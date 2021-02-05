@@ -34,7 +34,10 @@ use work.dvb_utils_pkg.all;
 -- Entity declaration --
 ------------------------
 entity axi_bit_interleaver is
-  generic (DATA_WIDTH : positive := 8);
+  generic (
+    TDATA_WIDTH : positive := 8;
+    TID_WIDTH   : positive := 8
+  );
   port (
     -- Usual ports
     clk               : in  std_logic;
@@ -46,15 +49,17 @@ entity axi_bit_interleaver is
 
     -- AXI input
     s_tvalid          : in  std_logic;
-    s_tdata           : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
     s_tlast           : in  std_logic;
     s_tready          : out std_logic;
+    s_tdata           : in  std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    s_tid             : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready          : in  std_logic;
     m_tvalid          : out std_logic;
     m_tlast           : out std_logic;
-    m_tdata           : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    m_tdata           : out std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    m_tid             : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_bit_interleaver;
 
 architecture axi_bit_interleaver of axi_bit_interleaver is
@@ -63,17 +68,17 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   -- Constants --
   ---------------
   constant RAM_PTR_WIDTH : integer := 2;
-  constant MAX_ROWS      : integer := 21_600 / DATA_WIDTH;
+  constant MAX_ROWS      : integer := 21_600 / TDATA_WIDTH;
   constant MAX_COLUMNS   : integer := 5;
 
   -- type addr_array_t is array (natural range <>)
   --   of unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-  type data_array_t is array (natural range <>) of std_logic_vector(DATA_WIDTH - 1 downto 0);
+  type data_array_t is array (natural range <>) of std_logic_vector(TDATA_WIDTH - 1 downto 0);
 
   -- RAM write interface
   type ram_wr_t is record
     addr : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-    data : std_logic_vector(DATA_WIDTH - 1 downto 0);
+    data : std_logic_vector(TDATA_WIDTH - 1 downto 0);
     en   : std_logic;
   end record;
 
@@ -83,7 +88,7 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   -- Signals --
   -------------
   -- Delayed AXI data
-  signal axi_tdata                 : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal axi_tdata                 : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal axi_tvalid                : std_logic;
   signal axi_tready                : std_logic;
   signal axi_tlast                 : std_logic;
@@ -107,30 +112,30 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
 
   signal cfg_wr_last_row           : unsigned(numbits(MAX_ROWS) - 1 downto 0);
   signal cfg_wr_last_column        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal cfg_wr_remainder          : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
-
+  signal cfg_wr_remainder          : unsigned(numbits(TDATA_WIDTH) - 1 downto 0);
+  signal cfg_wr_tid                : std_logic_vector(TID_WIDTH - 1 downto 0);
 
   signal cfg_fifo_wren             : std_logic;
   signal cfg_fifo_full             : std_logic;
   signal cfg_fifo_upper            : std_logic;
   -- Write side counters
-  signal bit_cnt                   : unsigned(2*numbits(DATA_WIDTH) - 1 downto 0);
+  signal bit_cnt                   : unsigned(2*numbits(TDATA_WIDTH) - 1 downto 0);
   signal wr_row_cnt                : unsigned(numbits(MAX_ROWS) - 1 downto 0);
   signal wr_column_cnt             : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
   -- signal wr_column_cnt_reg1        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal wr_remainder              : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
+  signal wr_remainder              : unsigned(numbits(TDATA_WIDTH) - 1 downto 0);
 
   signal wr_addr_init              : std_logic := '0';
 
   signal ram_wr_en                 : std_logic_vector(MAX_COLUMNS - 1 downto 0);
   signal ram_wr_addr               : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-  signal ram_wr_data               : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal ram_wr_data               : std_logic_vector(TDATA_WIDTH - 1 downto 0);
 
   -- When addressing the RAMs we don't need the pointer part of the address
   signal ram_wr_addr_no_pointer    : std_logic_vector(numbits(MAX_ROWS) downto 0);
   signal ram_rd_addr_no_pointer    : std_logic_vector(numbits(MAX_ROWS) downto 0);
 
-  signal tdata_sr_reg              : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
+  signal tdata_sr_reg              : std_logic_vector(3*TDATA_WIDTH - 1 downto 0);
 
   -- Read side config
   signal reading_frame             : std_logic;
@@ -140,7 +145,8 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   signal cfg_fifo_rd_code_rate     : code_rate_t;
   signal cfg_fifo_rd_last_row      : unsigned(numbits(MAX_ROWS) - 1 downto 0);
   signal cfg_fifo_rd_last_column   : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal cfg_fifo_rd_remainder     : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
+  signal cfg_fifo_rd_remainder     : unsigned(numbits(TDATA_WIDTH) - 1 downto 0);
+  signal cfg_fifo_rd_tid           : std_logic_vector(TID_WIDTH - 1 downto 0);
   signal cfg_fifo_rden             : std_logic;
   signal cfg_fifo_rddv             : std_logic;
   signal cfg_fifo_empty            : std_logic;
@@ -150,7 +156,8 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   signal cfg_rd_code_rate          : code_rate_t;
   signal cfg_rd_last_row           : unsigned(numbits(MAX_ROWS) - 1 downto 0);
   signal cfg_rd_last_column        : unsigned(numbits(MAX_COLUMNS) - 1 downto 0);
-  signal cfg_rd_remainder          : unsigned(numbits(DATA_WIDTH) - 1 downto 0);
+  signal cfg_rd_remainder          : unsigned(numbits(TDATA_WIDTH) - 1 downto 0);
+  signal cfg_rd_tid                : std_logic_vector(TID_WIDTH - 1 downto 0);
 
   signal rd_row_cnt                : unsigned(numbits(MAX_ROWS) - 1 downto 0);
 
@@ -161,19 +168,20 @@ architecture axi_bit_interleaver of axi_bit_interleaver is
   signal ram_rd_addr               : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
   signal ram_rd_data               : data_array_t(0 to MAX_COLUMNS - 1);
 
-  signal rd_data_sr                : std_logic_vector(MAX_COLUMNS*DATA_WIDTH - 1 downto 0);
+  signal rd_data_sr                : std_logic_vector(MAX_COLUMNS*TDATA_WIDTH - 1 downto 0);
 
-  signal interleaved_3c_012        : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
-  signal interleaved_3c_210        : std_logic_vector(3*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_0123       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_3210       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_4c_3201       : std_logic_vector(4*DATA_WIDTH - 1 downto 0);
-  signal interleaved_5c            : std_logic_vector(5*DATA_WIDTH - 1 downto 0);
+  signal interleaved_3c_012        : std_logic_vector(3*TDATA_WIDTH - 1 downto 0);
+  signal interleaved_3c_210        : std_logic_vector(3*TDATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_0123       : std_logic_vector(4*TDATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_3210       : std_logic_vector(4*TDATA_WIDTH - 1 downto 0);
+  signal interleaved_4c_3201       : std_logic_vector(4*TDATA_WIDTH - 1 downto 0);
+  signal interleaved_5c            : std_logic_vector(5*TDATA_WIDTH - 1 downto 0);
 
   signal m_wr_en                   : std_logic := '0';
   signal m_wr_en_reg               : std_logic := '0';
   signal m_wr_full                 : std_logic;
-  signal m_wr_data                 : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal m_wr_data                 : std_logic_vector(TDATA_WIDTH - 1 downto 0);
+  signal m_wr_tid                  : std_logic_vector(TID_WIDTH - 1 downto 0);
   signal m_wr_last                 : std_logic := '0';
   signal m_wr_last_reg             : std_logic := '0';
 
@@ -185,14 +193,14 @@ begin
   -- Port mappings --
   -------------------
   s_axi_delay_block : block
-    signal tdata_in  : std_logic_vector(DATA_WIDTH downto 0);
-    signal tdata_out : std_logic_vector(DATA_WIDTH downto 0);
+    signal tdata_in  : std_logic_vector(TDATA_WIDTH downto 0);
+    signal tdata_out : std_logic_vector(TDATA_WIDTH downto 0);
   begin
     -- Delay the incoming AXI data so we can register the config
     s_axi_delay_u : entity fpga_cores.axi_stream_delay
         generic map (
             DELAY_CYCLES => 1,
-            TDATA_WIDTH  => DATA_WIDTH + 1)
+            TDATA_WIDTH  => TDATA_WIDTH + 1)
         port map (
             -- Usual ports
             clk      => clk,
@@ -210,8 +218,8 @@ begin
 
       tdata_in <= s_tlast & s_tdata;
 
-      axi_tdata <= tdata_out(DATA_WIDTH - 1 downto 0);
-      axi_tlast <= tdata_out(DATA_WIDTH);
+      axi_tdata <= tdata_out(TDATA_WIDTH - 1 downto 0);
+      axi_tlast <= tdata_out(TDATA_WIDTH);
   end block;
 
   -- Generate 1 RAM for each column, each one gets written sequentially
@@ -221,7 +229,7 @@ begin
     ram : entity fpga_cores.ram_inference
       generic map (
         ADDR_WIDTH   => numbits(MAX_ROWS) + 1,
-        DATA_WIDTH   => DATA_WIDTH,
+        DATA_WIDTH   => TDATA_WIDTH,
         RAM_TYPE     => auto,
         -- TODO: Adjust the pipeline to handle OUTPUT_DELAY = 2 to get better timing on
         -- Xilinx devices (see message Synth 8-7053)
@@ -241,26 +249,36 @@ begin
         rddata_b  => ram_rd_data(column));
   end generate generate_rams;
 
-  -- Interleaved data takes 1 cycle after the address has changed, add support for
-  -- a couple of cycles to stop the pipeline
-  axi_master_adapter_u : entity fpga_cores.axi_stream_master_adapter
-    generic map (
-      MAX_SKEW_CYCLES => 3,
-      TDATA_WIDTH     => DATA_WIDTH)
-    port map (
-      -- Usual ports
-      clk      => clk,
-      reset    => rst,
-      -- Wannabe AXI interface
-      wr_en    => m_wr_en_reg,
-      wr_full  => m_wr_full,
-      wr_data  => m_wr_data,
-      wr_last  => m_wr_last_reg,
-      -- AXI master
-      m_tvalid => m_tvalid,
-      m_tready => m_tready,
-      m_tdata  => m_tdata,
-      m_tlast  => m_tlast);
+  axi_master_adapter_block : block
+    signal wr_data_agg : std_logic_vector(TDATA_WIDTH + TID_WIDTH - 1 downto 0);
+    signal rd_data_agg : std_logic_vector(TDATA_WIDTH + TID_WIDTH - 1 downto 0);
+  begin
+    wr_data_agg <= m_wr_tid & m_wr_data;
+
+    m_tdata <= rd_data_agg(TDATA_WIDTH - 1 downto 0);
+    m_tid   <= rd_data_agg(TID_WIDTH + TDATA_WIDTH - 1 downto TDATA_WIDTH);
+
+    -- Interleaved data takes 1 cycle after the address has changed, add support for
+    -- a couple of cycles to stop the pipeline
+    axi_master_adapter_u : entity fpga_cores.axi_stream_master_adapter
+      generic map (
+        MAX_SKEW_CYCLES => 3,
+        TDATA_WIDTH     => wr_data_agg'length)
+      port map (
+        -- Usual ports
+        clk      => clk,
+        reset    => rst,
+        -- Wannabe AXI interface
+        wr_en    => m_wr_en_reg,
+        wr_full  => m_wr_full,
+        wr_data  => wr_data_agg,
+        wr_last  => m_wr_last_reg,
+        -- AXI master
+        m_tvalid => m_tvalid,
+        m_tready => m_tready,
+        m_tdata  => rd_data_agg,
+        m_tlast  => m_tlast);
+  end block;
 
   -- Write and read side might be on different timings, decouple both sides with a FIFO to
   -- pass both the config parameters and the number of rows and columns
@@ -269,9 +287,10 @@ begin
       0 => FRAME_TYPE_WIDTH,
       1 => CONSTELLATION_WIDTH,
       2 => CODE_RATE_WIDTH,
-      3 => numbits(DATA_WIDTH),  -- remainder
+      3 => numbits(TDATA_WIDTH), -- remainder
       4 => numbits(MAX_COLUMNS), -- last column
-      5 => numbits(MAX_ROWS)     -- last row
+      5 => numbits(MAX_ROWS),    -- last row
+      6 => TID_WIDTH
     );
 
     constant CFG_FIFO_DATA_WIDTH : integer := sum(FIELD_WIDTHS);
@@ -281,13 +300,15 @@ begin
 
   begin
 
-    wr_data <= std_logic_vector(cfg_wr_last_row) &
+    wr_data <= cfg_wr_tid &
+               std_logic_vector(cfg_wr_last_row) &
                std_logic_vector(cfg_wr_last_column) &
                std_logic_vector(cfg_wr_remainder) &
                encode(cfg_wr_code_rate) &
                encode(cfg_wr_constellation) &
                encode(cfg_wr_frame_type);
 
+    cfg_fifo_rd_tid           <= get_field(rd_data, 6, FIELD_WIDTHS);
     cfg_fifo_rd_last_row      <= unsigned(std_logic_vector'(get_field(rd_data, 5, FIELD_WIDTHS)));
     cfg_fifo_rd_last_column   <= unsigned(std_logic_vector'(get_field(rd_data, 4, FIELD_WIDTHS)));
     cfg_fifo_rd_remainder     <= unsigned(std_logic_vector'(get_field(rd_data, 3, FIELD_WIDTHS)));
@@ -330,33 +351,33 @@ begin
   ------------------------------
   cfg_fifo_wren <= axi_dv and axi_tlast;
 
-  m_wr_data <= mirror_bits(rd_data_sr(DATA_WIDTH - 1 downto 0));
+  m_wr_data <= mirror_bits(rd_data_sr(TDATA_WIDTH - 1 downto 0));
 
   -- Assign the interleaved data statically
-  iter_rows : for row in 0 to DATA_WIDTH - 1 generate
+  iter_rows : for row in 0 to TDATA_WIDTH - 1 generate
     iter_3_columns : for column in 0 to 2 generate
-      interleaved_3c_012(3*DATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(column)(DATA_WIDTH - row - 1);
-      interleaved_3c_210(3*DATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(2 - column)(DATA_WIDTH - row - 1);
+      interleaved_3c_012(3*TDATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(column)(TDATA_WIDTH - row - 1);
+      interleaved_3c_210(3*TDATA_WIDTH - (3 * row + column) - 1) <= ram_rd_data(2 - column)(TDATA_WIDTH - row - 1);
     end generate;
 
-    interleaved_4c_0123(4*DATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(0)(DATA_WIDTH - row - 1);
-    interleaved_4c_0123(4*DATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(1)(DATA_WIDTH - row - 1);
-    interleaved_4c_0123(4*DATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(2)(DATA_WIDTH - row - 1);
-    interleaved_4c_0123(4*DATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(3)(DATA_WIDTH - row - 1);
+    interleaved_4c_0123(4*TDATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(0)(TDATA_WIDTH - row - 1);
+    interleaved_4c_0123(4*TDATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(1)(TDATA_WIDTH - row - 1);
+    interleaved_4c_0123(4*TDATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(2)(TDATA_WIDTH - row - 1);
+    interleaved_4c_0123(4*TDATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(3)(TDATA_WIDTH - row - 1);
 
-    interleaved_4c_3210(4*DATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(3)(DATA_WIDTH - row - 1);
-    interleaved_4c_3210(4*DATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(2)(DATA_WIDTH - row - 1);
-    interleaved_4c_3210(4*DATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(1)(DATA_WIDTH - row - 1);
-    interleaved_4c_3210(4*DATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(0)(DATA_WIDTH - row - 1);
+    interleaved_4c_3210(4*TDATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(3)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3210(4*TDATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(2)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3210(4*TDATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(1)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3210(4*TDATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(0)(TDATA_WIDTH - row - 1);
 
 
-    interleaved_4c_3201(4*DATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(3)(DATA_WIDTH - row - 1);
-    interleaved_4c_3201(4*DATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(2)(DATA_WIDTH - row - 1);
-    interleaved_4c_3201(4*DATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(0)(DATA_WIDTH - row - 1);
-    interleaved_4c_3201(4*DATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(1)(DATA_WIDTH - row - 1);
+    interleaved_4c_3201(4*TDATA_WIDTH - (4 * row + 0) - 1) <= ram_rd_data(3)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3201(4*TDATA_WIDTH - (4 * row + 1) - 1) <= ram_rd_data(2)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3201(4*TDATA_WIDTH - (4 * row + 2) - 1) <= ram_rd_data(0)(TDATA_WIDTH - row - 1);
+    interleaved_4c_3201(4*TDATA_WIDTH - (4 * row + 3) - 1) <= ram_rd_data(1)(TDATA_WIDTH - row - 1);
 
     iter_5_columns : for column in 0 to 4 generate
-      interleaved_5c(5*DATA_WIDTH - (5 * row + column) - 1) <= ram_rd_data(column)(DATA_WIDTH - row - 1);
+      interleaved_5c(5*TDATA_WIDTH - (5 * row + column) - 1) <= ram_rd_data(column)(TDATA_WIDTH - row - 1);
     end generate iter_5_columns;
   end generate iter_rows;
 
@@ -364,14 +385,14 @@ begin
   ram_wr_addr_no_pointer <= std_logic_vector(ram_wr_addr(numbits(MAX_ROWS) downto 0));
   ram_rd_addr_no_pointer <= std_logic_vector(ram_rd_addr(numbits(MAX_ROWS) downto 0));
 
-  ram_ptr_diff    <= wr_ram_ptr - rd_ram_ptr when wr_ram_ptr > rd_ram_ptr else
-                     2**RAM_PTR_WIDTH + wr_ram_ptr - rd_ram_ptr;
+  ram_ptr_diff <= wr_ram_ptr - rd_ram_ptr when wr_ram_ptr > rd_ram_ptr else
+                  2**RAM_PTR_WIDTH + wr_ram_ptr - rd_ram_ptr;
 
-  axi_tready <= wr_handler_ready and not cfg_fifo_full;
+  axi_tready   <= wr_handler_ready and not cfg_fifo_full;
 
-  axi_dv        <= '1' when axi_tready = '1' and axi_tvalid = '1' else '0';
+  axi_dv       <= '1' when axi_tready = '1' and axi_tvalid = '1' else '0';
 
-  s_tready <= s_tready_i;
+  s_tready     <= s_tready_i;
 
   --------------------------------
   -- Handle write side pointers --
@@ -411,8 +432,8 @@ begin
       wr_column_cnt_i := to_integer(wr_column_cnt);
 
       if axi_dv = '1' then
-        tdata_sr      := tdata_sr(tdata_sr'length - DATA_WIDTH - 1 downto 0) & axi_tdata;
-        bit_cnt_v     := bit_cnt_v + DATA_WIDTH;
+        tdata_sr      := tdata_sr(tdata_sr'length - TDATA_WIDTH - 1 downto 0) & axi_tdata;
+        bit_cnt_v     := bit_cnt_v + TDATA_WIDTH;
         s_tlast_reg   <= axi_tlast;
         if axi_tlast = '1' then
           wr_handler_ready <= '0';
@@ -431,24 +452,24 @@ begin
         s_tlast_reg                <= '0';
         ram_wr_en(wr_column_cnt_i) <= '1';
 
-        -- FIXME: Attempts to make this independent of DATA_WIDTH all failed with
+        -- FIXME: Attempts to make this independent of TDATA_WIDTH all failed with
         -- non-synthesizable constructs, but would be a nice to have
         case to_integer(bit_cnt_v) is
-          when      0 => ram_wr_data <= (DATA_WIDTH - 0 - 1 downto  0 => '0');
-          when      1 => ram_wr_data <= tdata_sr(1 - 1 downto 0) & (DATA_WIDTH - 1 - 1 downto  0 => '0');
-          when      2 => ram_wr_data <= tdata_sr(2 - 1 downto 0) & (DATA_WIDTH - 2 - 1 downto  0 => '0');
-          when      3 => ram_wr_data <= tdata_sr(3 - 1 downto 0) & (DATA_WIDTH - 3 - 1 downto  0 => '0');
-          when      4 => ram_wr_data <= tdata_sr(4 - 1 downto 0) & (DATA_WIDTH - 4 - 1 downto  0 => '0');
-          when      5 => ram_wr_data <= tdata_sr(5 - 1 downto 0) & (DATA_WIDTH - 5 - 1 downto  0 => '0');
-          when      6 => ram_wr_data <= tdata_sr(6 - 1 downto 0) & (DATA_WIDTH - 6 - 1 downto  0 => '0');
-          when      7 => ram_wr_data <= tdata_sr(7 - 1 downto 0) & (DATA_WIDTH - 7 - 1 downto  0 => '0');
-          when others => ram_wr_data <= tdata_sr(DATA_WIDTH - 1 downto 0);
+          when      0 => ram_wr_data <= (TDATA_WIDTH - 0 - 1 downto  0 => '0');
+          when      1 => ram_wr_data <= tdata_sr(1 - 1 downto 0) & (TDATA_WIDTH - 1 - 1 downto  0 => '0');
+          when      2 => ram_wr_data <= tdata_sr(2 - 1 downto 0) & (TDATA_WIDTH - 2 - 1 downto  0 => '0');
+          when      3 => ram_wr_data <= tdata_sr(3 - 1 downto 0) & (TDATA_WIDTH - 3 - 1 downto  0 => '0');
+          when      4 => ram_wr_data <= tdata_sr(4 - 1 downto 0) & (TDATA_WIDTH - 4 - 1 downto  0 => '0');
+          when      5 => ram_wr_data <= tdata_sr(5 - 1 downto 0) & (TDATA_WIDTH - 5 - 1 downto  0 => '0');
+          when      6 => ram_wr_data <= tdata_sr(6 - 1 downto 0) & (TDATA_WIDTH - 6 - 1 downto  0 => '0');
+          when      7 => ram_wr_data <= tdata_sr(7 - 1 downto 0) & (TDATA_WIDTH - 7 - 1 downto  0 => '0');
+          when others => ram_wr_data <= tdata_sr(TDATA_WIDTH - 1 downto 0);
         end case;
 
         -- This is the most concise way to express the above
         -- ram_wr_data
-        --   <= tdata_sr(minimum(to_integer(bit_cnt_v), DATA_WIDTH) - 1 downto 0)
-        --      & (DATA_WIDTH - minimum(to_integer(bit_cnt_v), DATA_WIDTH) - 1 downto 0 => '0');
+        --   <= tdata_sr(minimum(to_integer(bit_cnt_v), TDATA_WIDTH) - 1 downto 0)
+        --      & (TDATA_WIDTH - minimum(to_integer(bit_cnt_v), TDATA_WIDTH) - 1 downto 0 => '0');
 
         tdata_sr      := (others => 'U');
         bit_cnt_v     := (others => '0');
@@ -456,10 +477,10 @@ begin
         wr_row_cnt    <= (others => '0');
         wr_ram_ptr    <= wr_ram_ptr + 1;
         wr_addr_init  <= '1';
-      elsif bit_cnt_v >= DATA_WIDTH then
+      elsif bit_cnt_v >= TDATA_WIDTH then
 
         ram_wr_en(wr_column_cnt_i) <= '1';
-        ram_wr_data                <= tdata_sr(to_integer(bit_cnt_v) - 1 downto to_integer(bit_cnt_v) - DATA_WIDTH);
+        ram_wr_data                <= tdata_sr(to_integer(bit_cnt_v) - 1 downto to_integer(bit_cnt_v) - TDATA_WIDTH);
 
         wr_addr_init               <= '0';
 
@@ -470,7 +491,7 @@ begin
 
         wr_row : if wr_row_cnt /= cfg_wr_last_row then
           wr_row_cnt   <= wr_row_cnt + 1;
-          bit_cnt_v    := bit_cnt_v - DATA_WIDTH;
+          bit_cnt_v    := bit_cnt_v - TDATA_WIDTH;
         else
           wr_addr_init <= '1';
           wr_row_cnt   <= (others => '0');
@@ -488,7 +509,7 @@ begin
 
         end if wr_row;
 
-        if bit_cnt_v >= DATA_WIDTH then
+        if bit_cnt_v >= TDATA_WIDTH then
           wr_handler_ready <= '0';
         end if;
 
@@ -532,6 +553,7 @@ begin
 
       -- Sample data at the FIFO's output when reading from it
       if cfg_fifo_rddv = '1' then
+        cfg_rd_tid           <= cfg_fifo_rd_tid;
         cfg_fifo_rden        <= '0';
         reading_frame        <= '1';
 
@@ -553,6 +575,7 @@ begin
 
         rd_first_word <= '0';
         m_wr_en       <= '1';
+        m_wr_tid      <= cfg_rd_tid;
 
         -- Read pointers control logic
         if rd_column_cnt /= cfg_rd_last_column then
@@ -622,8 +645,8 @@ begin
 
         else
           -- We'll write the LSB, shift data right
-          rd_data_sr <= (DATA_WIDTH - 1 downto 0 => 'U')
-            & rd_data_sr(rd_data_sr'length - 1 downto DATA_WIDTH);
+          rd_data_sr <= (TDATA_WIDTH - 1 downto 0 => 'U')
+            & rd_data_sr(rd_data_sr'length - 1 downto TDATA_WIDTH);
         end if;
       end if;
     end if;
@@ -632,7 +655,6 @@ begin
   cfg_sample_block : block
     signal wr_first_word : std_logic; -- To sample config
   begin
-
     process(clk, rst)
       variable rows      : natural;
       variable columns   : natural;
@@ -649,6 +671,7 @@ begin
             cfg_wr_constellation <= cfg_constellation;
             cfg_wr_frame_type    <= cfg_frame_type;
             cfg_wr_code_rate     <= cfg_code_rate;
+            cfg_wr_tid           <= s_tid;
 
             if cfg_frame_type = fecframe_normal then
               if cfg_constellation = mod_8psk then
@@ -677,9 +700,9 @@ begin
             end if;
 
             -- These divisions should be determined at compile time so it should be fine
-            cfg_wr_last_row    <= to_unsigned(rows / DATA_WIDTH, numbits(MAX_ROWS)) - 0;
+            cfg_wr_last_row    <= to_unsigned(rows / TDATA_WIDTH, numbits(MAX_ROWS)) - 0;
             cfg_wr_last_column <= to_unsigned(columns, numbits(MAX_COLUMNS)) - 1;
-            cfg_wr_remainder   <= to_unsigned(rows mod DATA_WIDTH, numbits(DATA_WIDTH));
+            cfg_wr_remainder   <= to_unsigned(rows mod TDATA_WIDTH, numbits(TDATA_WIDTH));
 
           end if;
         end if;
