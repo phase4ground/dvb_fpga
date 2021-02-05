@@ -69,7 +69,7 @@ architecture dvbs2_tx_tb of dvbs2_tx_tb is
   constant DATA_WIDTH        : integer := 8;
   constant OUTPUT_DATA_WIDTH : integer := 32;
 
-  constant BB_SCRAMBLERS_CHECKER_NAME : string  := "bb_scrambler";
+  constant BB_SCRAMBLER_CHECKER_NAME  : string  := "bb_scrambler";
   constant BCH_ENCODER_CHECKER_NAME   : string  := "bch_encoder";
   constant LDPC_ENCODER_CHECKER_NAME  : string  := "ldpc_encoder";
 
@@ -107,9 +107,9 @@ architecture dvbs2_tx_tb of dvbs2_tx_tb is
   signal clk                   : std_logic := '1';
   signal rst                   : std_logic;
 
-  signal dbg_constellation     : constellation_t;
-  signal dbg_frame_type        : frame_type_t;
-  signal dbg_code_rate         : code_rate_t;
+  signal cfg_constellation     : constellation_t;
+  signal cfg_frame_type        : frame_type_t;
+  signal cfg_code_rate         : code_rate_t;
 
   signal data_probability      : real range 0.0 to 1.0 := 1.0;
   signal table_probability     : real range 0.0 to 1.0 := 1.0;
@@ -189,9 +189,9 @@ begin
       clk               => clk,
       rst               => rst,
 
-      cfg_constellation => encode(decode(axi_master.tuser).constellation),
-      cfg_frame_type    => encode(decode(axi_master.tuser).frame_type),
-      cfg_code_rate     => encode(decode(axi_master.tuser).code_rate),
+      cfg_constellation => encode(cfg_constellation),
+      cfg_frame_type    => encode(cfg_frame_type),
+      cfg_code_rate     => encode(cfg_code_rate),
 
       -- Mapping RAM config
       ram_wren          => ram_wren,
@@ -211,9 +211,10 @@ begin
       m_tlast           => axi_slave.axi.tlast,
       m_tdata           => axi_slave.axi.tdata);
 
+  -- ghdl translate_off
   bb_scrambler_checker_u : entity fpga_cores_sim.axi_file_compare
     generic map (
-      READER_NAME     => BB_SCRAMBLERS_CHECKER_NAME,
+      READER_NAME     => BB_SCRAMBLER_CHECKER_NAME,
       ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Error,
       DATA_WIDTH      => DATA_WIDTH)
@@ -282,6 +283,7 @@ begin
       s_tdata            => axi_ldpc_encoder_core.axi.tdata,
       s_tvalid           => axi_ldpc_encoder_core.axi.tvalid and axi_ldpc_encoder_core.axi.tready,
       s_tlast            => axi_ldpc_encoder_core.axi.tlast);
+  -- ghdl translate_on
 
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
@@ -319,9 +321,9 @@ begin
 
   axi_slave_tdata <= axi_slave.axi.tdata(23 downto 16) & axi_slave.axi.tdata(31 downto 24) & axi_slave.axi.tdata(7 downto 0) & axi_slave.axi.tdata(15 downto 8);
 
-  dbg_constellation <= decode(axi_master.tuser).constellation when axi_master.tvalid = '1';
-  dbg_frame_type    <= decode(axi_master.tuser).frame_type when axi_master.tvalid = '1';
-  dbg_code_rate     <= decode(axi_master.tuser).code_rate when axi_master.tvalid = '1';
+  cfg_constellation <= decode(axi_master.tuser).constellation;
+  cfg_frame_type    <= decode(axi_master.tuser).frame_type;
+  cfg_code_rate     <= decode(axi_master.tuser).code_rate;
 
   ---------------
   -- Processes --
@@ -332,7 +334,7 @@ begin
     variable file_checker         : file_reader_t := new_file_reader("axi_file_compare_u");
     variable ldpc_table           : file_reader_t := new_file_reader("axi_table_u");
 
-    variable bb_scrambler_checker : file_reader_t := new_file_reader(BB_SCRAMBLERS_CHECKER_NAME);
+    variable bb_scrambler_checker : file_reader_t := new_file_reader(BB_SCRAMBLER_CHECKER_NAME);
     variable bch_encoder_checker  : file_reader_t := new_file_reader(BCH_ENCODER_CHECKER_NAME);
     variable ldpc_encoder_checker : file_reader_t := new_file_reader(LDPC_ENCODER_CHECKER_NAME);
 
@@ -353,6 +355,12 @@ begin
       info("Waiting for test completion");
       wait_all_read(net, file_reader);
       wait_all_read(net, file_checker);
+      -- ghdl translate_off
+      wait_all_read(net, bb_scrambler_checker);
+      wait_all_read(net, bch_encoder_checker);
+      wait_all_read(net, ldpc_encoder_checker);
+      wait_all_read(net, ldpc_table);
+      -- ghdl translate_on
 
       wait until rising_edge(clk) and axi_slave.axi.tvalid = '0' for 1 ms;
 
@@ -467,9 +475,12 @@ begin
 
         read_file(net, ldpc_table, data_path & "/ldpc_table.bin");
 
+        -- ghdl translate_off
         read_file(net, bb_scrambler_checker, data_path & "/bch_encoder_input.bin", "1:8");
         read_file(net, bch_encoder_checker, data_path & "/ldpc_encoder_input.bin", "1:8");
         read_file(net, ldpc_encoder_checker, data_path & "/bit_interleaver_input.bin", "1:8");
+        -- ghdl translate_on
+
         read_file(net, file_checker, data_path & "/bit_mapper_output_fixed.bin");
 
       end loop;
