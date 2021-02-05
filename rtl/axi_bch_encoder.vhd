@@ -37,8 +37,8 @@ library fpga_cores;
 ------------------------
 entity axi_bch_encoder is
   generic (
-    DATA_WIDTH : integer  := 8
-  );
+    TDATA_WIDTH : integer := 8;
+    TID_WIDTH   : integer := 0);
   port (
     -- Usual ports
     clk            : in  std_logic;
@@ -49,15 +49,17 @@ entity axi_bch_encoder is
 
     -- AXI input
     s_tvalid       : in  std_logic;
-    s_tdata        : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
     s_tlast        : in  std_logic;
     s_tready       : out std_logic;
+    s_tdata        : in  std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    s_tid          : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready       : in  std_logic;
     m_tvalid       : out std_logic;
     m_tlast        : out std_logic;
-    m_tdata        : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    m_tdata        : out std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    m_tid          : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_bch_encoder;
 
 architecture axi_bch_encoder of axi_bch_encoder is
@@ -66,7 +68,7 @@ architecture axi_bch_encoder of axi_bch_encoder is
   -- Constants --
   ---------------
   -- To count to the max number of words appended to the frame
-  constant MAX_WORD_CNT : integer := 192 / DATA_WIDTH;
+  constant MAX_WORD_CNT : integer := 192 / TDATA_WIDTH;
 
   -------------
   -- Signals --
@@ -80,7 +82,7 @@ architecture axi_bch_encoder of axi_bch_encoder is
   signal s_axi_first_word     : std_logic;
 
   signal axi_delay_tvalid     : std_logic;
-  signal axi_delay_tdata      : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal axi_delay_tdata      : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal axi_delay_tlast      : std_logic;
   signal axi_delay_tready     : std_logic;
 
@@ -109,18 +111,18 @@ begin
   -- Delay the incoming data to match the BCH calculation delay so we can switch to
   -- appending without any bubbles
   data_delay_block : block
-    signal tdata_agg_in  : std_logic_vector(DATA_WIDTH downto 0);
-    signal tdata_agg_out : std_logic_vector(DATA_WIDTH downto 0);
+    signal tdata_agg_in  : std_logic_vector(TDATA_WIDTH downto 0);
+    signal tdata_agg_out : std_logic_vector(TDATA_WIDTH downto 0);
   begin
     tdata_agg_in    <= s_tlast & s_tdata;
 
-    axi_delay_tdata <= tdata_agg_out(DATA_WIDTH - 1 downto 0);
-    axi_delay_tlast <= tdata_agg_out(DATA_WIDTH);
+    axi_delay_tdata <= tdata_agg_out(TDATA_WIDTH - 1 downto 0);
+    axi_delay_tlast <= tdata_agg_out(TDATA_WIDTH);
 
     data_delay_u : entity fpga_cores.axi_stream_delay
       generic map (
         DELAY_CYCLES => 2,
-        TDATA_WIDTH  => DATA_WIDTH + 1)
+        TDATA_WIDTH  => TDATA_WIDTH + 1)
       port map (
         -- Usual ports
         clk     => clk,
@@ -140,7 +142,7 @@ begin
   -- BCH encoders are wrapped with a mux to hide away unrelated stuff. The idea is to keep
   -- the generated CRC codes as similar as possible to how they were generated
   bch_u : entity work.bch_encoder_mux
-    generic map (DATA_WIDTH => DATA_WIDTH)
+    generic map (DATA_WIDTH => TDATA_WIDTH)
     port map (
       clk                => clk,
       rst                => rst,
@@ -182,8 +184,9 @@ begin
                       axi_delay_tvalid when crc_word_cnt = 0 else
                       '1';
 
-  m_tdata          <= axi_delay_tdata when crc_word_cnt = 0 else
-                      crc_srl(crc_srl'length - 1 downto crc_srl'length - DATA_WIDTH);
+  m_tdata          <= (others => 'U') when m_tvalid_i = '0' else
+                      axi_delay_tdata when crc_word_cnt = 0 else
+                      crc_srl(crc_srl'length - 1 downto crc_srl'length - TDATA_WIDTH);
 
   m_tlast_i        <= '1' when crc_word_cnt = 1 else '0';
 
@@ -208,8 +211,8 @@ begin
 
       if m_axi_data_valid = '1' and crc_word_cnt /= 0 then
         -- Shift the CRC, tdata will be assigned to the MSB
-        crc_srl      <= crc_srl(crc_srl'length - DATA_WIDTH - 1 downto 0)
-                        & (DATA_WIDTH - 1 downto 0 => 'U');
+        crc_srl      <= crc_srl(crc_srl'length - TDATA_WIDTH - 1 downto 0)
+                        & (TDATA_WIDTH - 1 downto 0 => 'U');
         crc_word_cnt <= crc_word_cnt - 1;
       end if;
 
@@ -225,10 +228,10 @@ begin
 
         if s_tlast = '1' then
           -- This is mostly static, so division should not be a problem. In any case,
-          -- DATA_WIDTH will always be a power of 2, so this division will map to a shift
+          -- TDATA_WIDTH will always be a power of 2, so this division will map to a shift
           -- operation
           crc_word_cnt_next <= to_unsigned(
-                            get_crc_length(frame_type, code_rate) / DATA_WIDTH,
+                            get_crc_length(frame_type, code_rate) / TDATA_WIDTH,
                             crc_word_cnt'length);
         end if;
 
@@ -266,10 +269,13 @@ begin
     signal frame_type_ff : frame_type_t;
     signal code_rate_ff  : code_rate_t;
     signal first_word    : std_logic;
+    signal tid_reg       : std_logic_vector(TID_WIDTH - 1 downto 0);
   begin
 
     frame_type <= cfg_frame_type when first_word = '1' and s_axi_data_valid = '1' else frame_type_ff;
     code_rate  <= cfg_code_rate when first_word = '1' and s_axi_data_valid = '1' else code_rate_ff;
+
+    m_tid      <= tid_reg when m_tvalid_i = '1' else (others => 'U');
 
     process(clk)
     begin
@@ -279,6 +285,7 @@ begin
 
           -- Sample the BCH code used on the first word
           if first_word = '1' then
+            tid_reg       <= s_tid;
             frame_type_ff <= cfg_frame_type;
             code_rate_ff  <= cfg_code_rate;
           end if;

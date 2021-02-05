@@ -61,7 +61,7 @@ architecture dvbs2_tx of dvbs2_tx is
   ---------------
   -- Constants --
   ---------------
-  constant CHAIN_LENGTH : positive := 5;
+  constant CHAIN_LENGTH         : positive := 5;
 
   -----------
   -- Types --
@@ -71,6 +71,7 @@ architecture dvbs2_tx of dvbs2_tx is
   -------------
   -- Signals --
   -------------
+  signal config        : std_logic_array_t(CHAIN_LENGTH - 1 downto 0)(ENCODED_CONFIG_WIDTH - 1 downto 0);
   signal frame_type    : frame_type_array_t(CHAIN_LENGTH - 1 downto 0);
   signal constellation : constellation_array_t(CHAIN_LENGTH - 1 downto 0);
   signal code_rate     : code_rate_array_t(CHAIN_LENGTH - 1 downto 0);
@@ -93,7 +94,7 @@ begin
   bb_scrambler_u : entity work.axi_baseband_scrambler
     generic map (
       TDATA_WIDTH => DATA_WIDTH,
-      TID_WIDTH  => 0)
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
     port map (
       -- Usual ports
       clk      => clk,
@@ -104,50 +105,33 @@ begin
       s_tdata  => tdata(0),
       s_tlast  => tlast(0),
       s_tready => tready(0),
-      s_tid    => (others => 'U'),
+      s_tid    => config(0),
 
       -- AXI output
       m_tready => tready(1),
       m_tvalid => tvalid(1),
       m_tlast  => tlast(1),
-      m_tdata  => tdata(1));
-
-  bch_encoder_cfg_fifo_u : entity work.config_fifo
-    generic map ( FIFO_DEPTH => 4 )
-    port map (
-      -- Usual ports
-      clk             => clk,
-      rst             => rst,
-
-      -- Write side
-      wr_en           => cfg_sample_en(0),
-      full            => open,
-      constellation_i => constellation(0),
-      frame_type_i    => frame_type(0),
-      code_rate_i     => code_rate(0),
-
-      -- Read side
-      rd_en           => cfg_sample_en(1),
-      empty           => open,
-      constellation_o => constellation(1),
-      frame_type_o    => frame_type(1),
-      code_rate_o     => code_rate(1));
+      m_tdata  => tdata(1),
+      m_tid    => config(1));
 
   bch_encoder_u : entity work.axi_bch_encoder
-    generic map (DATA_WIDTH => DATA_WIDTH)
+    generic map (
+      TDATA_WIDTH => DATA_WIDTH,
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
     port map (
       -- Usual ports
       clk            => clk,
       rst            => rst,
 
-      cfg_frame_type => frame_type(1),
-      cfg_code_rate  => code_rate(1),
+      cfg_frame_type => decode(config(1)).frame_type,
+      cfg_code_rate  => decode(config(1)).code_rate,
 
       -- AXI input
       s_tvalid       => tvalid(1),
       s_tdata        => tdata(1),
       s_tlast        => tlast(1),
       s_tready       => tready(1),
+      s_tid => (others => 'U'),
 
       -- AXI output
       m_tready       => tready(2),
@@ -254,6 +238,10 @@ begin
   constellation(0) <= decode(cfg_constellation);
   frame_type(0)    <= decode(cfg_frame_type);
   code_rate(0)     <= decode(cfg_code_rate);
+
+  config(0) <= encode((frame_type    => decode(cfg_frame_type), 
+                       constellation => decode(cfg_constellation),
+                       code_rate     => decode(cfg_code_rate)));
 
   tvalid(0)        <= s_tvalid;
   tdata(0)         <= s_tdata;
