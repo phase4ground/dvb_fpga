@@ -261,7 +261,6 @@ LDPC_LENGTH = {
     (FrameType.FECFRAME_SHORT, CodeRate.C8_9): 16_200 - 14_400,
 }
 
-
 PLFRAME_HEADER_CONFIGS = [
     TestDefinition.fromConfigTuple(frame_type, constellation, code_rate)
     for frame_type, constellation, code_rate in (
@@ -289,7 +288,7 @@ PLFRAME_HEADER_CONFIGS = [
         (FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C4_5),
         (FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C5_6),
         (FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C8_9),
-        (FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C9_10),
+        #  (FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C9_10),
         (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C2_3),
         (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C3_4),
         (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C4_5),

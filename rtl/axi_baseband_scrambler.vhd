@@ -110,13 +110,10 @@ begin
         m_tlast    <= '0';
       end if;
 
-      if s_tvalid = '1' then
-        m_tid_i    <= s_tid;
-      end if;
-
       if s_axi_dv = '1' then
         m_tvalid_i <= '1';
         m_tlast    <= s_tlast;
+        m_tid_i    <= s_tid;
 
         -- Calculate the next LFSR
         next_lfsr := lfsr;
