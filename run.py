@@ -385,12 +385,14 @@ def _populateLdpcTable(config: TestDefinition):  # pylint: disable=too-many-loca
 
 # FIXME: Not all configs generate tables, need to look at what to do in those
 # cases
-def _getModulationTable(config: TestDefinition):
+def _getModulationTable(
+    frame_type: FrameType, constellation: ConstellationType, code_rate: CodeRate
+):
     """
     Returns the modulation table for a given config
     """
     # pylint: disable=invalid-name
-    if config.constellation == ConstellationType.MOD_QPSK:
+    if constellation == ConstellationType.MOD_QPSK:
         return (
             # QPSK
             (math.cos(math.pi / 4.0), math.sin(math.pi / 4.0)),
@@ -399,7 +401,7 @@ def _getModulationTable(config: TestDefinition):
             (math.cos(5 * math.pi / 4.0), math.sin(5 * math.pi / 4.0)),
         )
 
-    if config.constellation == ConstellationType.MOD_8PSK:
+    if constellation == ConstellationType.MOD_8PSK:
         return (
             (math.cos(math.pi / 4.0), math.sin(math.pi / 4.0)),
             (math.cos(0.0), math.sin(0.0)),
@@ -411,10 +413,10 @@ def _getModulationTable(config: TestDefinition):
             (math.cos(6 * math.pi / 4.0), math.sin(6 * math.pi / 4.0)),
         )
 
-    if config.constellation == ConstellationType.MOD_16APSK:
+    if constellation == ConstellationType.MOD_16APSK:
         r1 = 1.0
         r2 = 1.0
-        if config.frame_type == FrameType.FECFRAME_NORMAL:
+        if frame_type == FrameType.FECFRAME_NORMAL:
             r1 = {
                 CodeRate.C2_3: r2 / 3.15,
                 CodeRate.C3_4: r2 / 2.85,
@@ -423,8 +425,8 @@ def _getModulationTable(config: TestDefinition):
                 CodeRate.C8_9: r2 / 2.60,
                 CodeRate.C9_10: r2 / 2.57,
                 CodeRate.C3_5: r2 / 3.70,
-            }.get(config.code_rate, 0.0)
-        elif config.frame_type == FrameType.FECFRAME_SHORT:
+            }.get(code_rate, 0.0)
+        elif frame_type == FrameType.FECFRAME_SHORT:
             r1 = {
                 CodeRate.C2_3: r2 / 3.15,
                 CodeRate.C3_4: r2 / 2.85,
@@ -432,11 +434,13 @@ def _getModulationTable(config: TestDefinition):
                 CodeRate.C5_6: r2 / 2.70,
                 CodeRate.C8_9: r2 / 2.60,
                 CodeRate.C3_5: r2 / 3.70,
-            }.get(config.code_rate, 0.0)
+            }.get(code_rate, 0.0)
 
         r0 = math.sqrt(4.0 / ((r1 * r1) + 3.0 * (r2 * r2)))
         r1 = r0 * r1
         r2 = r0 * r2
+
+        #  assert 0.0 not in (r0, r1, r2), f"Invalid value for coefficients"
         return (
             (r2 * math.cos(math.pi / 4.0), r2 * math.sin(math.pi / 4.0)),
             (r2 * math.cos(-math.pi / 4.0), r2 * math.sin(-math.pi / 4.0)),
@@ -456,7 +460,7 @@ def _getModulationTable(config: TestDefinition):
             (r1 * math.cos(-3 * math.pi / 4.0), r1 * math.sin(-3 * math.pi / 4.0)),
         )
 
-    if config.constellation == ConstellationType.MOD_32APSK:
+    if constellation == ConstellationType.MOD_32APSK:
         r1 = 1.0
         r2 = 1.0
         r3 = 1.0
@@ -466,7 +470,7 @@ def _getModulationTable(config: TestDefinition):
             CodeRate.C5_6: r3 / 4.64,
             CodeRate.C8_9: r3 / 4.33,
             CodeRate.C9_10: r3 / 4.30,
-        }.get(config.code_rate, 0.0)
+        }.get(code_rate, 0.0)
 
         r2 = {
             CodeRate.C3_4: r1 * 2.84,
@@ -474,7 +478,10 @@ def _getModulationTable(config: TestDefinition):
             CodeRate.C5_6: r1 * 2.64,
             CodeRate.C8_9: r1 * 2.54,
             CodeRate.C9_10: r1 * 2.53,
-        }.get(config.code_rate, 0.0)
+        }.get(code_rate, 0.0)
+
+        #  assert r1, f"Invalid value for r1: {r1}"
+        #  assert r2, f"Invalid value for r2: {r2}"
 
         r0 = math.sqrt(8.0 / ((r1 * r1) + 3.0 * (r2 * r2) + 4.0 * (r3 * r3)))
         r1 *= r0
@@ -529,17 +536,28 @@ def _createModulationTable(config: TestDefinition):
     if p.exists(target):
         return
 
+    try:
+        table = _getModulationTable(
+            frame_type=config.frame_type,
+            constellation=config.constellation,
+            code_rate=config.code_rate,
+        )
+    except:
+        print(
+            f"Failed to generate modulation RAM contents for FECFRAME={config.frame_type.value}, "
+            f"modulation={config.constellation.value}, code rate={config.code_rate.value}."
+        )
+        raise
+
     print(
         f"Generating modulation RAM contents for FECFRAME={config.frame_type.value}, "
         f"modulation={config.constellation.value}, code rate={config.code_rate.value}. "
-        f'Data will be written to "{config.test_files_path}"',
+        f'Data will be written to "{target}"',
     )
 
     with open(target, "wb") as fd:
-        table = _getModulationTable(config)
-        # Normalize the maximum value if it's higher than 1.0. In the VHDL side
-        # we're converting to fixed point based on the data width, so values
-        # need to be scaled between [-1.0, 1.0)
+        # Values dumped from GNU Radio are adjusted for some reason. Adjust so
+        # the max value is 1.0 for now
         max_value = max(1.0, max([max(abs(x[0]), abs(x[1])) for x in table]))
         for cos, sin in table:
             fd.write(bytes(str(cos / max_value), encoding="utf8"))
@@ -652,12 +670,6 @@ def setupTests(vunit, args):
             )
 
         for config in _getConfigs():
-            vunit.library("lib").entity("dvbs2_tx_tb").add_config(
-                name=config.name,
-                generics=dict(
-                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=2,
-                ),
-            )
             vunit.library("lib").entity("axi_constellation_mapper_tb").add_config(
                 name=config.name,
                 generics=dict(
@@ -691,7 +703,7 @@ def setupTests(vunit, args):
         # --individual-config-runs is passed, all configs are added
         addAllConfigsTest(
             entity=vunit.library("lib").entity("dvbs2_tx_tb"),
-            configs=_getConfigs(code_rates=(CodeRate.C1_4, CodeRate.C9_10)),
+            configs=PLFRAME_HEADER_CONFIGS,
         )
 
     addAllConfigsTest(
@@ -706,6 +718,12 @@ def setupTests(vunit, args):
                 name=config.name,
                 generics=dict(
                     test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=3,
+                ),
+            )
+            vunit.library("lib").entity("dvbs2_tx_tb").add_config(
+                name=config.name,
+                generics=dict(
+                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=2,
                 ),
             )
 

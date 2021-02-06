@@ -173,6 +173,7 @@ begin
       m_tid             => ldpc_encoder_out.tuser);
 
 
+  -- TODO: add axi stream delay before and after this
   -- Bit interleaver is not needed for QPSK
   bit_interleaver_demux_u : entity fpga_cores.axi_stream_demux
     generic map (

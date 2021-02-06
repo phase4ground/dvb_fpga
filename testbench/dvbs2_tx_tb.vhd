@@ -26,6 +26,8 @@ use std.textio.all;
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.math_real.all;
+use ieee.math_complex.all;
 
 library vunit_lib;
 context vunit_lib.vunit_context;
@@ -42,8 +44,7 @@ use fpga_cores.axi_pkg.all;
 use fpga_cores.common_pkg.all;
 
 library fpga_cores_sim;
-use fpga_cores_sim.testbench_utils_pkg.all;
-use fpga_cores_sim.file_utils_pkg.all;
+context fpga_cores_sim.sim_context;
 
 use work.dvb_utils_pkg.all;
 use work.dvb_sim_utils_pkg.all;
@@ -289,7 +290,7 @@ begin
     generic map (
       READER_NAME     => "axi_file_compare_u",
       ERROR_CNT_WIDTH => 8,
-      REPORT_SEVERITY => Error,
+      REPORT_SEVERITY => Note,
       DATA_WIDTH      => OUTPUT_DATA_WIDTH)
     port map (
       -- Usual ports
@@ -575,4 +576,77 @@ begin
     end if;
   end process; -- }} -------------------------------------------------------------------
 
+  receiver_p : process -- {{ -----------------------------------------------------------
+    constant logger      : logger_t := get_logger("receiver");
+    variable word_cnt    : natural  := 0;
+    variable frame_cnt   : natural  := 0;
+
+    function to_real ( constant v : signed ) return real is
+      constant width : integer := v'length;
+    begin
+      return real(to_integer(v)) / real(2**(width - 1));
+    end;
+
+    function to_complex ( constant v : std_logic_vector ) return complex is
+      constant width : integer := v'length;
+    begin
+      return complex'(
+        re => to_real(signed(v(width - 1 downto width/2))),
+        im => to_real(signed(v(width/2 - 1 downto 0)))
+      );
+    end function;
+
+    constant TOLERANCE        : real := 0.02;
+    variable recv_r           : complex;
+    variable expected_r       : complex;
+    variable recv_p           : complex_polar;
+    variable expected_p       : complex_polar;
+    variable expected_lendian : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+    variable expected_i       : signed(OUTPUT_DATA_WIDTH/2 - 1 downto 0);
+    variable expected_q       : signed(OUTPUT_DATA_WIDTH/2 - 1 downto 0);
+
+  begin
+    wait until axi_slave.axi.tvalid = '1' and axi_slave.axi.tready = '1' and rising_edge(clk);
+    -- receiver_busy    <= True;
+    expected_lendian := axi_slave.expected_tdata(23 downto 16) & axi_slave.expected_tdata(31 downto 24) & axi_slave.expected_tdata(7 downto 0) & axi_slave.expected_tdata(15 downto 8);
+
+    recv_r           := to_complex(axi_slave.axi.tdata);
+    expected_r       := to_complex(expected_lendian);
+
+    recv_p           := complex_to_polar(recv_r);
+    expected_p       := complex_to_polar(expected_r);
+
+    if axi_slave.axi.tdata /= expected_lendian then
+      if    (recv_p.mag >= 0.0 xor expected_p.mag >= 0.0)
+         or (recv_p.arg >= 0.0 xor expected_p.arg >= 0.0)
+         or abs(recv_p.mag) < abs(expected_p.mag) * (1.0 - TOLERANCE)
+         or abs(recv_p.mag) > abs(expected_p.mag) * (1.0 + TOLERANCE)
+         or abs(recv_p.arg) < abs(expected_p.arg) * (1.0 - TOLERANCE)
+         or abs(recv_p.arg) > abs(expected_p.arg) * (1.0 + TOLERANCE) then
+        error(
+          logger,
+          sformat(
+            "[%d, %d] Comparison failed. " & lf &
+            "Got      %r rect(%s, %s) / polar(%s, %s)" & lf &
+            "Expected %r rect(%s, %s) / polar(%s, %s)",
+            fo(frame_cnt),
+            fo(word_cnt),
+            fo(axi_slave.axi.tdata),
+            real'image(recv_r.re), real'image(recv_r.im),
+            real'image(recv_p.mag), real'image(recv_p.arg),
+            fo(expected_lendian),
+            real'image(expected_r.re), real'image(expected_r.im),
+            real'image(expected_p.mag), real'image(expected_p.arg)
+          ));
+      end if;
+    end if;
+
+    word_cnt := word_cnt + 1;
+    if axi_slave.axi.tlast = '1' then
+      -- receiver_busy <= False;
+      info(logger, sformat("Received frame %d with %d words", fo(frame_cnt), fo(word_cnt)));
+      word_cnt  := 0;
+      frame_cnt := frame_cnt + 1;
+    end if;
+  end process; -- }} -------------------------------------------------------------------
 end dvbs2_tx_tb;

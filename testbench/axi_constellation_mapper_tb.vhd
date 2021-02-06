@@ -26,6 +26,8 @@ use std.textio.all;
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.math_real.all;
+use ieee.math_complex.all;
 
 library vunit_lib;
 context vunit_lib.vunit_context;
@@ -109,7 +111,6 @@ architecture axi_constellation_mapper_tb of axi_constellation_mapper_tb is
 
   signal expected_tvalid        : std_logic;
   signal expected_tdata         : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
-  signal expected_tdata_lendian : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
 
   signal m_data_valid           : boolean;
   signal s_data_valid           : boolean;
@@ -206,8 +207,6 @@ begin
       m_tvalid           => expected_tvalid,
       m_tlast            => open);
 
-  expected_tdata_lendian <= expected_tdata(23 downto 16) & expected_tdata(31 downto 24) & expected_tdata(7 downto 0) & expected_tdata(15 downto 8);
-
   ------------------------------
   -- Asynchronous assignments --
   ------------------------------
@@ -274,7 +273,7 @@ begin
       constant path         : string) is
       file file_handler     : text;
       variable L            : line;
-      variable r0, r1       : real;
+      variable map_i, map_q : real;
       variable addr         : integer := initial_addr;
       variable index        : unsigned(5 downto 0) := (others => '0');
     begin
@@ -283,30 +282,35 @@ begin
       file_open(file_handler, path, read_mode);
       while not endfile(file_handler) loop
         readline(file_handler, L);
-        read(L, r0);
+        read(L, map_i);
         readline(file_handler, L);
-        read(L, r1);
+        read(L, map_q);
         info(
           sformat(
-            "[%b] Writing RAM: %2d => %13s (%r) / %13s (%r)",
+            "[%b] Writing RAM: %2d => (%13s, %13s) => %13s (%r) / %13s (%r)",
             fo(index),
             fo(addr),
-            real'image(r0),
-            fo(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)),
-            real'image(r1),
-            fo(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+            real'image(map_i),
+            real'image(map_q),
+            real'image(map_i),
+            fo(to_fixed_point(map_i, OUTPUT_DATA_WIDTH/2)),
+            real'image(map_q),
+            fo(to_fixed_point(map_q, OUTPUT_DATA_WIDTH/2))
           )
         );
 
         write_ram(
           addr,
-          std_logic_vector(to_fixed_point(r0, OUTPUT_DATA_WIDTH/2)) &
-          std_logic_vector(to_fixed_point(r1, OUTPUT_DATA_WIDTH/2))
+          std_logic_vector(to_fixed_point(map_i, OUTPUT_DATA_WIDTH/2)) &
+          std_logic_vector(to_fixed_point(map_q, OUTPUT_DATA_WIDTH/2))
         );
         addr := addr + 1;
         index := index + 1;
       end loop;
       file_close(file_handler);
+      if index = 0 then
+        failure("Failed to update RAM from file");
+      end if;
     end procedure; -- }} ---------------------------------------------------------------
 
     procedure run_test ( -- {{ ---------------------------------------------------------
@@ -424,85 +428,62 @@ begin
     variable word_cnt    : natural  := 0;
     variable frame_cnt   : natural  := 0;
 
-    type iq_pair_t is record
-      i : real;
-      q : real;
-    end record;
-
-    function to_real ( constant v : std_logic_vector ) return real is
+    function to_real ( constant v : signed ) return real is
       constant width : integer := v'length;
     begin
-      return real(to_integer(signed(v))) / real(2**(width - 1));
+      return real(to_integer(v)) / real(2**(width - 1));
     end;
 
-    function to_iq_pair ( constant v : std_logic_vector ) return iq_pair_t is
+    function to_complex ( constant v : std_logic_vector ) return complex is
       constant width : integer := v'length;
     begin
-      return iq_pair_t'(
-        i => to_real(v(width - 1 downto width/2)),
-        q => to_real(v(width/2 - 1 downto 0))
+      return complex'(
+        re => to_real(signed(v(width - 1 downto width/2))),
+        im => to_real(signed(v(width/2 - 1 downto 0)))
       );
     end function;
 
-    -- TODO: This does not look great, either make it a proper package so it can be reused
-    -- in other modules or compare using signed
-    function "*" ( constant l : iq_pair_t; constant r : real ) return iq_pair_t is
-    begin
-      return (i => l.i * r, q => l.q * r);
-    end;
-
-    function "<" ( constant l, r : iq_pair_t ) return boolean is
-    begin
-      return l.i < r.i and l.q < r.q;
-    end;
-
-    function "<=" ( constant l, r : iq_pair_t ) return boolean is
-    begin
-      return l.i <= r.i and l.q <= r.q;
-    end;
-
-    function ">" ( constant l, r : iq_pair_t ) return boolean is
-    begin
-      return l.i > r.i and l.q > r.q;
-    end;
-
-    function ">=" ( constant l, r : iq_pair_t ) return boolean is
-    begin
-      return l.i >= r.i and l.q >= r.q;
-    end;
-
-    constant TOLERANCE : real := 0.05;
-    variable actual   : iq_pair_t;
-    variable expected : iq_pair_t;
+    constant TOLERANCE        : real := 0.05;
+    variable recv_r           : complex;
+    variable expected_r       : complex;
+    variable recv_p           : complex_polar;
+    variable expected_p       : complex_polar;
+    variable expected_lendian : std_logic_vector(OUTPUT_DATA_WIDTH - 1 downto 0);
+    variable expected_i       : signed(OUTPUT_DATA_WIDTH/2 - 1 downto 0);
+    variable expected_q       : signed(OUTPUT_DATA_WIDTH/2 - 1 downto 0);
 
   begin
     wait until axi_slave.tvalid = '1' and axi_slave.tready = '1' and rising_edge(clk);
-    receiver_busy <= True;
+    receiver_busy    <= True;
+    expected_lendian := expected_tdata(23 downto 16) & expected_tdata(31 downto 24) & expected_tdata(7 downto 0) & expected_tdata(15 downto 8);
 
-    -- Try to match values literally (works for QPSK and 8 PSK), otherwise convert to real
-    -- and compare with a margin of error
-    if axi_slave.tdata /= expected_tdata_lendian then
-      actual   := to_iq_pair(axi_slave.tdata);
-      expected := to_iq_pair(expected_tdata_lendian);
+    recv_r           := to_complex(axi_slave.tdata);
+    expected_r       := to_complex(expected_lendian);
 
-      if (actual > (0.0, 0.0) and (actual < expected * (1.0 - TOLERANCE) or actual > expected * (1.0 + TOLERANCE))) or
-         (actual < (0.0, 0.0) and (actual > expected * (1.0 - TOLERANCE) or actual < expected * (1.0 + TOLERANCE))) then
+    recv_p           := complex_to_polar(recv_r);
+    expected_p       := complex_to_polar(expected_r);
+
+    if axi_slave.tdata /= expected_lendian then
+      if    (recv_p.mag >= 0.0 xor expected_p.mag >= 0.0)
+         or (recv_p.arg >= 0.0 xor expected_p.arg >= 0.0)
+         or abs(recv_p.mag) < abs(expected_p.mag) * (1.0 - TOLERANCE)
+         or abs(recv_p.mag) > abs(expected_p.mag) * (1.0 + TOLERANCE)
+         or abs(recv_p.arg) < abs(expected_p.arg) * (1.0 - TOLERANCE)
+         or abs(recv_p.arg) > abs(expected_p.arg) * (1.0 + TOLERANCE) then
         error(
           logger,
           sformat(
-            "[%d, %d] got" & lf & "%r (%s, %s), expected" & lf & "%r (%s, %s)" & lf & "(between   (%s, %s)" & lf & "and        (%s, %s))",
+            "[%d, %d] Comparison failed. " & lf &
+            "Got      %r rect(%s, %s) / polar(%s, %s)" & lf &
+            "Expected %r rect(%s, %s) / polar(%s, %s)",
             fo(frame_cnt),
             fo(word_cnt),
             fo(axi_slave.tdata),
-            real'image(actual.i),
-            real'image(actual.q),
-            fo(expected_tdata_lendian),
-            real'image(expected.i),
-            real'image(expected.q),
-            real'image(expected.i * (1.0 - TOLERANCE)),
-            real'image(expected.q * (1.0 - TOLERANCE)),
-            real'image(expected.i * (1.0 + TOLERANCE)),
-            real'image(expected.q * (1.0 + TOLERANCE))
+            real'image(recv_r.re), real'image(recv_r.im),
+            real'image(recv_p.mag), real'image(recv_p.arg),
+            fo(expected_lendian),
+            real'image(expected_r.re), real'image(expected_r.im),
+            real'image(expected_p.mag), real'image(expected_p.arg)
           ));
       end if;
     end if;
