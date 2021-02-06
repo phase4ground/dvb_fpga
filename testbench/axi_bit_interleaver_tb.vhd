@@ -56,7 +56,7 @@ entity axi_bit_interleaver_tb is
   generic (
     RUNNER_CFG            : string;
     TEST_CFG              : string;
-    DATA_WIDTH            : integer := 8;
+    TDATA_WIDTH           : integer := 8;
     NUMBER_OF_TEST_FRAMES : integer := 8);
 end axi_bit_interleaver_tb;
 
@@ -103,12 +103,12 @@ architecture axi_bit_interleaver_tb of axi_bit_interleaver_tb is
   signal tready_probability : real range 0.0 to 1.0 := 1.0;
 
   -- AXI input
-  signal axi_master         : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_master         : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   signal axi_master_dv      : boolean;
-  signal axi_slave          : axi_stream_bus_t(tdata(DATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   signal axi_slave_dv       : boolean;
 
-  signal expected_tdata     : std_logic_vector(DATA_WIDTH - 1 downto 0);
+  signal expected_tdata     : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal expected_tlast     : std_logic;
   signal tdata_error_cnt    : std_logic_vector(7 downto 0);
   signal tlast_error_cnt    : std_logic_vector(7 downto 0);
@@ -122,7 +122,7 @@ begin
   axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
     generic map (
       READER_NAME => "axi_file_reader_u",
-      DATA_WIDTH  => DATA_WIDTH,
+      DATA_WIDTH  => TDATA_WIDTH,
       TID_WIDTH   => ENCODED_CONFIG_WIDTH)
     port map (
       -- Usual ports
@@ -141,7 +141,7 @@ begin
 
   dut : entity work.axi_bit_interleaver
     generic map (
-      TDATA_WIDTH => DATA_WIDTH,
+      TDATA_WIDTH => TDATA_WIDTH,
       TID_WIDTH   => ENCODED_CONFIG_WIDTH
     )
     port map (
@@ -172,7 +172,7 @@ begin
       READER_NAME     => "axi_file_compare_u",
       ERROR_CNT_WIDTH => 8,
       REPORT_SEVERITY => Warning,
-      DATA_WIDTH      => DATA_WIDTH)
+      DATA_WIDTH      => TDATA_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
@@ -293,7 +293,7 @@ begin
       tvalid_probability <= 1.0;
       tready_probability <= 1.0;
 
-      set_timeout(runner, configs'length * NUMBER_OF_TEST_FRAMES * 4 ms / DATA_WIDTH);
+      set_timeout(runner, configs'length * NUMBER_OF_TEST_FRAMES * 4 ms / TDATA_WIDTH);
 
       if run("back_to_back") then
         tvalid_probability <= 1.0;
@@ -389,12 +389,12 @@ begin
     end record;
 
     constant RAM_PTR_WIDTH : integer := 2;
-    constant MAX_ROWS      : integer := 21_600 / DATA_WIDTH;
+    constant MAX_ROWS      : integer := 21_600 / TDATA_WIDTH;
     constant MAX_COLUMNS   : integer := 5;
 
     type addr_array_t is array (natural range <>)
       of unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-    type data_array_t is array (natural range <>) of std_logic_vector(DATA_WIDTH - 1 downto 0);
+    type data_array_t is array (natural range <>) of std_logic_vector(TDATA_WIDTH - 1 downto 0);
 
     -- signal ram_wr_addr               : addr_array_t(MAX_COLUMNS - 1 downto 0);
     -- signal ram_wr_data               : data_array_t(MAX_COLUMNS - 1 downto 0);
@@ -402,7 +402,7 @@ begin
 
     type ram_wr_t is record
       addr : unsigned(numbits(MAX_ROWS) + RAM_PTR_WIDTH - 1 downto 0);
-      data : std_logic_vector(DATA_WIDTH - 1 downto 0);
+      data : std_logic_vector(TDATA_WIDTH - 1 downto 0);
       en   : std_logic;
     end record;
 
@@ -450,9 +450,9 @@ begin
         columns := 5;
       end if;
 
-      return (row_number    => rows / DATA_WIDTH + 1,
+      return (row_number    => rows / TDATA_WIDTH + 1,
               column_number => columns,
-              remainder     => rows mod DATA_WIDTH);
+              remainder     => rows mod TDATA_WIDTH);
 
     end function get_interleaver_config;
 
@@ -484,13 +484,13 @@ begin
       constant cfg           : cfg_t ) is
       variable msg           : msg_t;
 
-      variable data_sr       : std_logic_vector(2*DATA_WIDTH - 1 downto 0);
+      variable data_sr       : std_logic_vector(2*TDATA_WIDTH - 1 downto 0);
       variable is_last       : boolean := False;
       variable bit_cnt       : natural := 0;
 
-      variable expected_data : std_logic_vector(DATA_WIDTH - 1 downto 0);
+      variable expected_data : std_logic_vector(TDATA_WIDTH - 1 downto 0);
       variable ram_addr      : unsigned(numbits(MAX_ROWS) - 1 downto 0);
-      variable ram_data      : std_logic_vector(DATA_WIDTH - 1 downto 0);
+      variable ram_data      : std_logic_vector(TDATA_WIDTH - 1 downto 0);
       variable offset        : natural := 0;
     begin
 
@@ -499,11 +499,11 @@ begin
         for row in 0 to cfg.row_number - 1 loop
 
           -- Receive AXI data if we need more
-          if bit_cnt < DATA_WIDTH and not is_last then
+          if bit_cnt < TDATA_WIDTH and not is_last then
             receive(net, whitebox_axi_monitor, msg);
-            data_sr := data_sr(data_sr'length - DATA_WIDTH - 1 downto 0) & std_logic_vector'(pop(msg));
+            data_sr := data_sr(data_sr'length - TDATA_WIDTH - 1 downto 0) & std_logic_vector'(pop(msg));
             is_last := pop(msg);
-            bit_cnt := bit_cnt + DATA_WIDTH;
+            bit_cnt := bit_cnt + TDATA_WIDTH;
           end if;
 
           -- Receive RAM data
@@ -515,9 +515,9 @@ begin
           -- For the last row we'll only compare the relevant bits
           if row = cfg.row_number - 1 then
             expected_data := data_sr(bit_cnt - 1 downto bit_cnt - cfg.remainder)
-                             & (DATA_WIDTH - 1 downto cfg.remainder => 'U');
+                             & (TDATA_WIDTH - 1 downto cfg.remainder => 'U');
           else
-            expected_data := data_sr(bit_cnt - 1 downto bit_cnt - DATA_WIDTH);
+            expected_data := data_sr(bit_cnt - 1 downto bit_cnt - TDATA_WIDTH);
           end if;
 
           info(
@@ -573,7 +573,7 @@ begin
             bit_cnt := bit_cnt - cfg.remainder;
             data_sr := (data_sr'length - bit_cnt - 1 downto 0 => 'U') & data_sr(bit_cnt - 1 downto 0);
           else
-            bit_cnt := bit_cnt - DATA_WIDTH;
+            bit_cnt := bit_cnt - TDATA_WIDTH;
           end if;
         end loop;
       end loop;
