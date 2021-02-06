@@ -790,7 +790,7 @@ begin
         info(sformat("Updated expected TID to %r", fo(expected_tid)));
       end if;
 
-      check_equal(axi_slave.tuser, expected_tid);
+      check_equal(axi_slave.tuser, expected_tid, "TID check failed");
 
       first_word := False;
       if axi_slave.tlast = '1' then

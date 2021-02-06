@@ -673,14 +673,13 @@ begin
       axi_bit_tdata_reg1   <= 'U';
       dbg_axi_bit_cnt_reg0 <= (others => 'U');
       dbg_axi_bit_cnt_reg1 <= (others => 'U');
-    elsif rising_edge(clk) then
 
-      if axi_passthrough.tvalid = '1' then
-        m_tid_reg <= axi_passthrough.tuser;
-      end if;
+      m_tid_reg            <= (others => 'U');
+    elsif rising_edge(clk) then
 
       -- Switch between forwarding data from s_axi or the codes calculated internally
       if axi_passthrough.tvalid = '1' and axi_passthrough.tready = '1' then
+        m_tid_reg <= axi_passthrough.tuser;
         if axi_passthrough.tlast = '1' then
           forward_encoded_data <= '1';
         end if;
