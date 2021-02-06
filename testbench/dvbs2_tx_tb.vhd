@@ -286,29 +286,28 @@ begin
       s_tlast            => axi_ldpc_encoder_core.axi.tlast);
   -- ghdl translate_on
 
-  axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
+  -- Can't check against expected data directly because of rounding errors, so use a file
+  -- reader to get the contents
+  output_ref_data_u : entity fpga_cores_sim.axi_file_reader
     generic map (
-      READER_NAME     => "axi_file_compare_u",
-      ERROR_CNT_WIDTH => 8,
-      REPORT_SEVERITY => Note,
-      DATA_WIDTH      => OUTPUT_DATA_WIDTH)
+      READER_NAME => "output_ref_data_u",
+      DATA_WIDTH  => OUTPUT_DATA_WIDTH)
     port map (
       -- Usual ports
       clk                => clk,
       rst                => rst,
       -- Config and status
-      tdata_error_cnt    => axi_slave.tdata_error_cnt,
-      tlast_error_cnt    => axi_slave.tlast_error_cnt,
-      error_cnt          => axi_slave.error_cnt,
-      tready_probability => tready_probability,
-      -- Debug stuff
-      expected_tdata     => axi_slave.expected_tdata,
-      expected_tlast     => axi_slave.expected_tlast,
-      -- Data input
-      s_tready           => axi_slave.axi.tready,
-      s_tdata            => axi_slave_tdata,
-      s_tvalid           => axi_slave.axi.tvalid,
-      s_tlast            => axi_slave.axi.tlast);
+      completed          => open,
+      tvalid_probability => 1.0,
+
+      -- Data output
+      m_tready           => axi_slave.axi.tready and axi_slave.axi.tvalid,
+      m_tdata            => axi_slave.expected_tdata,
+      -- m_tid              => axi_slave.axi.tuser,
+      m_tvalid           => open,
+      m_tlast            => open);
+
+  axi_slave.axi.tready <= '1';
 
   ------------------------------
   -- Asynchronous assignments --
@@ -332,7 +331,7 @@ begin
   main : process -- {{ -----------------------------------------------------------------
     constant self                 : actor_t       := new_actor("main");
     variable file_reader          : file_reader_t := new_file_reader("input_stream_u");
-    variable file_checker         : file_reader_t := new_file_reader("axi_file_compare_u");
+    variable file_checker         : file_reader_t := new_file_reader("output_ref_data_u");
     variable ldpc_table           : file_reader_t := new_file_reader("axi_table_u");
 
     variable bb_scrambler_checker : file_reader_t := new_file_reader(BB_SCRAMBLER_CHECKER_NAME);
@@ -360,7 +359,7 @@ begin
       wait_all_read(net, bb_scrambler_checker);
       wait_all_read(net, bch_encoder_checker);
       wait_all_read(net, ldpc_encoder_checker);
-      wait_all_read(net, ldpc_table);
+      -- wait_all_read(net, ldpc_table);
       -- ghdl translate_on
 
       wait until rising_edge(clk) and axi_slave.axi.tvalid = '0' for 1 ms;
@@ -493,7 +492,7 @@ begin
     test_runner_setup(runner, RUNNER_CFG);
     show(display_handler, debug);
     hide(get_logger("file_reader_t(input_stream_u)"), display_handler, debug, True);
-    hide(get_logger("file_reader_t(axi_file_compare_u)"), display_handler, debug, True);
+    hide(get_logger("file_reader_t(output_ref_data_u)"), display_handler, debug, True);
     hide(get_logger("file_reader_t(axi_table_u)"), display_handler, debug, True);
 
     while test_suite loop
@@ -516,11 +515,7 @@ begin
       end if;
 
       wait_for_completion;
-
-      check_equal(axi_slave.error_cnt, 0, sformat("Expected 0 errors but got %d", fo(axi_slave.error_cnt)));
-
       check_equal(axi_slave.axi.tvalid, '0', "axi_slave.axi.tvalid should be '0'");
-      check_equal(axi_slave.error_cnt, 0);
 
       walk(32);
 
@@ -562,20 +557,6 @@ begin
   end block signal_spy_block; -- }} ----------------------------------------------------
 -- ghdl translate_on
 
-  report_rx : process -- {{ ------------------------------------------------------------
-    constant logger    : logger_t   := get_logger("axi_slave report");
-    variable word_cnt  : natural := 0;
-    variable frame_cnt : natural := 0;
-  begin
-    wait until s_data_valid = '1' and rising_edge(clk);
-    word_cnt := word_cnt + 1;
-    if axi_slave.axi.tlast = '1' then
-      info(logger, sformat("Received frame %d with %d words", fo(frame_cnt), fo(word_cnt)));
-      frame_cnt := frame_cnt + 1;
-      word_cnt  := 0;
-    end if;
-  end process; -- }} -------------------------------------------------------------------
-
   receiver_p : process -- {{ -----------------------------------------------------------
     constant logger      : logger_t := get_logger("receiver");
     variable word_cnt    : natural  := 0;
@@ -596,7 +577,7 @@ begin
       );
     end function;
 
-    constant TOLERANCE        : real := 0.02;
+    constant TOLERANCE        : real := 0.10;
     variable recv_r           : complex;
     variable expected_r       : complex;
     variable recv_p           : complex_polar;
