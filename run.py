@@ -261,7 +261,7 @@ LDPC_LENGTH = {
     (FrameType.FECFRAME_SHORT, CodeRate.C8_9): 16_200 - 14_400,
 }
 
-PLFRAME_HEADER_CONFIGS = [
+PLFRAME_HEADER_CONFIGS = {
     TestDefinition.fromConfigTuple(frame_type, constellation, code_rate)
     for frame_type, constellation, code_rate in (
         (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C2_3),
@@ -318,7 +318,43 @@ PLFRAME_HEADER_CONFIGS = [
         (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_QPSK, CodeRate.C8_9),
         (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_QPSK, CodeRate.C9_10),
     )
-]
+}
+
+# List specific valid 16 APSK and 32 APSK configs
+CONSTELLATION_MAPPER_CONFIGS = (
+    set(_getConfigs(constellations=(ConstellationType.MOD_QPSK,)))
+    | set(_getConfigs(constellations=(ConstellationType.MOD_8PSK,)))
+    | {
+        TestDefinition.fromConfigTuple(frame_type, constellation, code_rate)
+        for frame_type, constellation, code_rate in (
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C2_3),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C3_4),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C4_5),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C5_6),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C8_9),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C9_10),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_16APSK, CodeRate.C3_5),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C2_3),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C3_4),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C4_5),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C5_6),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C8_9),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_16APSK, CodeRate.C3_5),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_32APSK, CodeRate.C3_4),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_32APSK, CodeRate.C4_5),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_32APSK, CodeRate.C5_6),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_32APSK, CodeRate.C8_9),
+            (FrameType.FECFRAME_NORMAL, ConstellationType.MOD_32APSK, CodeRate.C9_10),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_32APSK, CodeRate.C3_4),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_32APSK, CodeRate.C4_5),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_32APSK, CodeRate.C5_6),
+            (FrameType.FECFRAME_SHORT, ConstellationType.MOD_32APSK, CodeRate.C8_9),
+            # this should work but GNU Radio itself doesn't handle it for some
+            # reason
+            # (FrameType.FECFRAME_SHORT, ConstellationType.MOD_32APSK, CodeRate.C9_10),
+        )
+    }
+)
 
 
 def _populateLdpcTable(config: TestDefinition):  # pylint: disable=too-many-locals
@@ -383,8 +419,6 @@ def _populateLdpcTable(config: TestDefinition):  # pylint: disable=too-many-loca
         text_fd.close()
 
 
-# FIXME: Not all configs generate tables, need to look at what to do in those
-# cases
 def _getModulationTable(
     frame_type: FrameType, constellation: ConstellationType, code_rate: CodeRate
 ):
@@ -440,7 +474,6 @@ def _getModulationTable(
         r1 = r0 * r1
         r2 = r0 * r2
 
-        #  assert 0.0 not in (r0, r1, r2), f"Invalid value for coefficients"
         return (
             (r2 * math.cos(math.pi / 4.0), r2 * math.sin(math.pi / 4.0)),
             (r2 * math.cos(-math.pi / 4.0), r2 * math.sin(-math.pi / 4.0)),
@@ -479,9 +512,6 @@ def _getModulationTable(
             CodeRate.C8_9: r1 * 2.54,
             CodeRate.C9_10: r1 * 2.53,
         }.get(code_rate, 0.0)
-
-        #  assert r1, f"Invalid value for r1: {r1}"
-        #  assert r2, f"Invalid value for r2: {r2}"
 
         r0 = math.sqrt(8.0 / ((r1 * r1) + 3.0 * (r2 * r2) + 4.0 * (r3 * r3)))
         r1 *= r0
@@ -566,15 +596,14 @@ def _createModulationTable(config: TestDefinition):
             fd.write(b"\n")
 
 
-def _createLdpcTables():
+def _createAuxiliaryTables():
     """
     Creates the binary LDPC table files if they don't already exist
     """
     pool = Pool()
 
-    for config in TEST_CONFIGS:
-        pool.apply_async(_populateLdpcTable, (config,))
-        pool.apply_async(_createModulationTable, (config,))
+    pool.map_async(_populateLdpcTable, TEST_CONFIGS)
+    pool.map_async(_createModulationTable, CONSTELLATION_MAPPER_CONFIGS)
 
     pool.close()
     pool.join()
@@ -703,7 +732,7 @@ def setupTests(vunit, args):
         # --individual-config-runs is passed, all configs are added
         addAllConfigsTest(
             entity=vunit.library("lib").entity("dvbs2_tx_tb"),
-            configs=PLFRAME_HEADER_CONFIGS,
+            configs=PLFRAME_HEADER_CONFIGS & CONSTELLATION_MAPPER_CONFIGS
         )
 
     addAllConfigsTest(
@@ -720,6 +749,7 @@ def setupTests(vunit, args):
                     test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=3,
                 ),
             )
+        for config in PLFRAME_HEADER_CONFIGS & CONSTELLATION_MAPPER_CONFIGS:
             vunit.library("lib").entity("dvbs2_tx_tb").add_config(
                 name=config.name,
                 generics=dict(
@@ -790,7 +820,7 @@ def main():
     "Main entry point for DVB FPGA test runner"
 
     _generateGnuRadioData()
-    _createLdpcTables()
+    _createAuxiliaryTables()
 
     cli = VUnitCLI()
     cli.parser.add_argument(
