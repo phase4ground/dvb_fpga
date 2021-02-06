@@ -698,11 +698,11 @@ def setupTests(vunit, args):
                 ),
             )
 
-        for config in _getConfigs():
+        for config in CONSTELLATION_MAPPER_CONFIGS:
             vunit.library("lib").entity("axi_constellation_mapper_tb").add_config(
                 name=config.name,
                 generics=dict(
-                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=1,
+                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=3,
                 ),
             )
 
@@ -714,7 +714,7 @@ def setupTests(vunit, args):
 
         addAllConfigsTest(
             entity=vunit.library("lib").entity("axi_constellation_mapper_tb"),
-            configs=TEST_CONFIGS,
+            configs=CONSTELLATION_MAPPER_CONFIGS,
         )
 
         addAllConfigsTest(
