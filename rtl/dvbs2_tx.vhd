@@ -236,9 +236,10 @@ begin
     -- Merge LDPC encoder and bit interleaver streams to feed into the constellation mapper
     pre_constellaion_mapper_arbiter_u : entity fpga_cores.axi_stream_arbiter
       generic map (
-        MODE       => "ROUND_ROBIN", -- ROUND_ROBIN, INTERLEAVED, ABSOLUTE
-        INTERFACES => 2,
-        DATA_WIDTH => DATA_WIDTH + ENCODED_CONFIG_WIDTH)
+        MODE            => "ROUND_ROBIN", -- ROUND_ROBIN, INTERLEAVED, ABSOLUTE
+        INTERFACES      => 2,
+        DATA_WIDTH      => DATA_WIDTH + ENCODED_CONFIG_WIDTH,
+        REGISTER_INPUTS => True)
       port map (
         -- Usual ports
         clk              => clk,
