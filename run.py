@@ -732,7 +732,7 @@ def setupTests(vunit, args):
         # --individual-config-runs is passed, all configs are added
         addAllConfigsTest(
             entity=vunit.library("lib").entity("dvbs2_tx_tb"),
-            configs=PLFRAME_HEADER_CONFIGS & CONSTELLATION_MAPPER_CONFIGS
+            configs=PLFRAME_HEADER_CONFIGS & CONSTELLATION_MAPPER_CONFIGS,
         )
 
     addAllConfigsTest(
@@ -795,8 +795,28 @@ def setupTests(vunit, args):
                 ),
             )
 
+    # Physical layer framer only connects axi_plframe_header and
+    # axi_physical_layer_scrambler and both are tested individually, so we
+    # don't need to test all configs
+    vunit.library("lib").entity("axi_physical_layer_framer_tb").add_config(
+        name="test",
+        generics=dict(
+            test_cfg=TestDefinition.fromConfigTuple(
+                FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C1_2
+            ).getTestConfigString()
+        ),
+    )
+    vunit.library("lib").entity("axi_physical_layer_scrambler_tb").add_config(
+        name="test",
+        generics=dict(
+            test_cfg=TestDefinition.fromConfigTuple(
+                FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C1_2
+            ).getTestConfigString()
+        ),
+    )
 
-def addAllConfigsTest(entity, configs):
+
+def addAllConfigsTest(entity, configs, name=None):
     """
     Adds a test config with all combinations of configurations (assuming both
     input and reference files ca be found)
@@ -811,7 +831,7 @@ def addAllConfigsTest(entity, configs):
     assert params, "Could not find any config files!"
 
     entity.add_config(
-        name="test_all_configs",
+        name=name or "test_all_configs",
         generics=dict(test_cfg="|".join(params), NUMBER_OF_TEST_FRAMES=1),
     )
 
