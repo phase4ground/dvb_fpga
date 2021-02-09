@@ -146,6 +146,7 @@ begin
       if m_tready = '1' then
         m_tvalid_i <= '0';
         m_tlast    <= '0';
+        m_tid      <= (others => 'U');
       end if;
 
       if s_tvalid = '1' and s_tready_i = '1' then

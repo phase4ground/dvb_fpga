@@ -147,7 +147,6 @@ begin
   -- BCH encoders are wrapped with a mux to hide away unrelated stuff. The idea is to keep
   -- the generated CRC codes as similar as possible to how they were generated
   bch_u : entity work.bch_encoder_mux
-    generic map (DATA_WIDTH => TDATA_WIDTH)
     port map (
       clk                => clk,
       rst                => rst,

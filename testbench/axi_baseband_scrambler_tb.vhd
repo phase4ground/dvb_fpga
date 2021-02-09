@@ -203,8 +203,7 @@ begin
     end procedure run_test;
 
     ------------------------------------------------------------------------------------
-    procedure wait_for_transfers ( constant count : in natural) is
-      variable msg : msg_t;
+    procedure wait_for_transfers is
     begin
       wait_all_read(net, file_reader);
       wait_all_read(net, file_checker);
@@ -236,7 +235,7 @@ begin
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
 
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("slow_master") then
         tvalid_probability <= 0.5;
@@ -245,7 +244,7 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("slow_slave") then
         tvalid_probability <= 1.0;
@@ -254,7 +253,7 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("both_slow") then
         tvalid_probability <= 0.75;
@@ -263,7 +262,7 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       end if;
 

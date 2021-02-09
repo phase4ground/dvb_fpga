@@ -237,19 +237,12 @@ begin
 
         read_file( net, ref_data, data_path & "/plframe_payload_pilots_off_fixed_point.bin");
 
-        -- Update the expected TID
-        msg := new_msg;
-        push(msg, encode(config_tuple));
-        send(net, find("tid_check"), msg);
-
       end loop;
 
     end procedure run_test; -- }} ------------------------------------------------------
 
-    procedure wait_for_transfers ( constant count : in natural) is
-      variable msg : msg_t;
+    procedure wait_for_transfers is
     begin
-      info("Waiting for files to be read");
       wait_all_read(net, file_reader);
       wait_all_read(net, ref_data);
     end procedure wait_for_transfers;
@@ -281,7 +274,7 @@ begin
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
 
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("slow_master") then
         tvalid_probability <= 0.5;
@@ -290,7 +283,7 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("slow_slave") then
         tvalid_probability <= 1.0;
@@ -299,7 +292,7 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+        wait_for_transfers;
 
       elsif run("both_slow") then
         tvalid_probability <= 0.75;
@@ -308,7 +301,8 @@ begin
         for i in configs'range loop
           run_test(configs(i), number_of_frames => NUMBER_OF_TEST_FRAMES);
         end loop;
-        wait_for_transfers(configs'length);
+
+        wait_for_transfers;
 
       end if;
 
@@ -324,8 +318,8 @@ begin
     variable tid_rand_check : RandomPType;
     variable expected_tid   : std_logic_vector(TID_WIDTH - 1 downto 0);
     variable first_word     : boolean;
-    variable frame_cnt    : integer := 0;
-    variable word_cnt     : integer := 0;
+    variable frame_cnt      : integer := 0;
+    variable word_cnt       : integer := 0;
   begin
     tid_rand_check.InitSeed("seed");
     first_word := True;
