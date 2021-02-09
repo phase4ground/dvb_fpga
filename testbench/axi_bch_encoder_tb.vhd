@@ -60,7 +60,6 @@ architecture axi_bch_encoder_tb of axi_bch_encoder_tb is
   constant configs           : config_array_t := get_test_cfg(TEST_CFG);
 
   constant CLK_PERIOD        : time := 5 ns;
-  constant TDATA_WIDTH       : integer := 8;
 
   -------------
   -- Signals --
@@ -73,15 +72,15 @@ architecture axi_bch_encoder_tb of axi_bch_encoder_tb is
   signal cfg_code_rate      : code_rate_t;
 
   -- AXI input
-  signal axi_master         : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_master         : axi_stream_bus_t(tdata(7 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   signal axi_master_dv      : boolean;
-  signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_slave          : axi_stream_bus_t(tdata(7 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
   signal axi_slave_dv       : boolean;
 
   signal tvalid_probability : real range 0.0 to 1.0 := 1.0;
   signal tready_probability : real range 0.0 to 1.0 := 1.0;
 
-  signal expected_tdata     : std_logic_vector(TDATA_WIDTH - 1 downto 0);
+  signal expected_tdata     : std_logic_vector(7 downto 0);
   signal expected_tlast     : std_logic;
   signal tdata_error_cnt    : std_logic_vector(7 downto 0);
   signal tlast_error_cnt    : std_logic_vector(7 downto 0);
@@ -95,7 +94,7 @@ begin
   axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
     generic map (
       READER_NAME => "axi_file_reader_u",
-      DATA_WIDTH  => TDATA_WIDTH,
+      DATA_WIDTH  => 8,
       TID_WIDTH   => ENCODED_CONFIG_WIDTH)
     port map (
       -- Usual ports
@@ -112,9 +111,7 @@ begin
       m_tlast            => axi_master.tlast);
 
   dut : entity work.axi_bch_encoder
-    generic map (
-      TDATA_WIDTH => TDATA_WIDTH,
-      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
+    generic map ( TID_WIDTH => ENCODED_CONFIG_WIDTH )
     port map (
       -- Usual ports
       clk            => clk,
@@ -140,7 +137,7 @@ begin
       READER_NAME     => "axi_file_compare_u",
       ERROR_CNT_WIDTH => 8,
       -- REPORT_SEVERITY => Warning,
-      DATA_WIDTH      => TDATA_WIDTH)
+      DATA_WIDTH      => 8)
     port map (
       -- Usual ports
       clk                => clk,

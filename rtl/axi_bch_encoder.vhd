@@ -36,9 +36,7 @@ library fpga_cores;
 -- Entity declaration --
 ------------------------
 entity axi_bch_encoder is
-  generic (
-    TDATA_WIDTH : integer := 8;
-    TID_WIDTH   : integer := 0);
+  generic ( TID_WIDTH   : integer := 0 );
   port (
     -- Usual ports
     clk            : in  std_logic;
@@ -51,14 +49,14 @@ entity axi_bch_encoder is
     s_tvalid       : in  std_logic;
     s_tlast        : in  std_logic;
     s_tready       : out std_logic;
-    s_tdata        : in  std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    s_tdata        : in  std_logic_vector(7 downto 0);
     s_tid          : in  std_logic_vector(TID_WIDTH - 1 downto 0);
 
     -- AXI output
     m_tready       : in  std_logic;
     m_tvalid       : out std_logic;
     m_tlast        : out std_logic;
-    m_tdata        : out std_logic_vector(TDATA_WIDTH - 1 downto 0);
+    m_tdata        : out std_logic_vector(7 downto 0);
     m_tid          : out std_logic_vector(TID_WIDTH - 1 downto 0));
 end axi_bch_encoder;
 
@@ -67,6 +65,10 @@ architecture axi_bch_encoder of axi_bch_encoder is
   ---------------
   -- Constants --
   ---------------
+  -- Leaving this as constant in case we need to change in the future. The main issue is
+  -- the actual CRC blocks are not generic (they were generated individually), so support
+  -- other data widths values is not trivial
+  constant TDATA_WIDTH : integer := 8;
   -- To count to the max number of words appended to the frame
   constant MAX_WORD_CNT : integer := 192 / TDATA_WIDTH;
 

@@ -18,6 +18,10 @@
 -- You should have received a copy of the GNU General Public License
 -- along with DVB FPGA.  If not, see <http://www.gnu.org/licenses/>.
 
+
+-- Supporting other data widths might need quite a bit of work as we might need to deal
+-- with partially valid words (data + mask)
+
 ---------------
 -- Libraries --
 ---------------
@@ -31,7 +35,6 @@ use work.dvb_utils_pkg.all;
 -- Entity declaration --
 ------------------------
 entity bch_encoder_mux is
-  generic ( DATA_WIDTH : integer := 8 );
   port (
     clk                : in std_logic;
     rst                : in std_logic;
@@ -40,14 +43,14 @@ entity bch_encoder_mux is
     cfg_code_rate_in   : in code_rate_t;
     first_word         : in std_logic; -- First data. 1: SEED is used (initialise and calculate), 0: Previous CRC is used (continue and calculate)
     wr_en              : in std_logic; -- New Data. wr_data input has a valid data. Calculate new CRC
-    wr_data            : in std_logic_vector(DATA_WIDTH - 1 downto 0);  -- Data in
+    wr_data            : in std_logic_vector(7 downto 0);  -- Data in
 
     -- Output config/data
     cfg_frame_type_out : out frame_type_t;
     cfg_code_rate_out  : out code_rate_t;
     crc_rdy            : out std_logic;
     crc                : out std_logic_vector(191 downto 0);
-    data_out           : out std_logic_vector(DATA_WIDTH - 1 downto 0));
+    data_out           : out std_logic_vector(7 downto 0));
 end bch_encoder_mux;
 
 architecture bch_encoder_mux of bch_encoder_mux is
@@ -90,7 +93,7 @@ architecture bch_encoder_mux of bch_encoder_mux is
   -----------
   -- Types --
   -----------
-  type data_array_t is array(natural range <>) of std_logic_vector(DATA_WIDTH - 1 downto 0);
+  type data_array_t is array(natural range <>) of std_logic_vector(7 downto 0);
   type crc_array_t is array(natural range <>) of std_logic_vector(CRC_WIDTH - 1 downto 0);
 
   -------------
@@ -109,98 +112,87 @@ architecture bch_encoder_mux of bch_encoder_mux is
   signal data_out_array   : data_array_t(MUX_WIDTH - 1 downto 0);
   signal crc_out_array    : crc_array_t(MUX_WIDTH - 1 downto 0);
 
-begin
+  signal crc_192_ulogic      : std_ulogic_vector(191 downto 0);
+  signal data_out_192_ulogic : std_ulogic_vector(7 downto 0);
+  
+  signal crc_168_ulogic      : std_ulogic_vector(167 downto 0);
+  signal data_out_168_ulogic : std_ulogic_vector(7 downto 0);
 
-  -- Supporting other data widths might need quite a bit of work as we might need to deal
-  -- with partially valid words (data + mask)
-  assert DATA_WIDTH = 8
-    report "Unsupported DATA_WIDTH " & integer'image(DATA_WIDTH)
-    severity Failure;
+  signal crc_160_ulogic      : std_ulogic_vector(159 downto 0);
+  signal data_out_160_ulogic : std_ulogic_vector(7 downto 0);
+
+  signal crc_128_ulogic      : std_ulogic_vector(127 downto 0);
+  signal data_out_128_ulogic : std_ulogic_vector(7 downto 0);
+
+begin
 
   -------------------
   -- Port mappings --
   -------------------
-  -- instantiate BCH blocks for DATA_WIDTH = 8
-  data_width_8_gen : if DATA_WIDTH = 8 generate
-    signal crc_192_ulogic      : std_ulogic_vector(191 downto 0);
-    signal data_out_192_ulogic : std_ulogic_vector(7 downto 0);
-    
-    signal crc_168_ulogic      : std_ulogic_vector(167 downto 0);
-    signal data_out_168_ulogic : std_ulogic_vector(7 downto 0);
+  bch_192_u : entity work.bch_192x8
+    generic map (SEED => (others => '0'))
+    port map (
+      clk   => clk,
+      reset => rst,
+      fd    => first_word,
+      nd    => wr_en_array(CRC_192_INDEX),
+      rdy   => crc_rdy_array(CRC_192_INDEX),
+      d     => std_ulogic_vector(wr_data),
+      c     => crc_192_ulogic,
+      -- CRC output
+      o     => data_out_192_ulogic);
 
-    signal crc_160_ulogic      : std_ulogic_vector(159 downto 0);
-    signal data_out_160_ulogic : std_ulogic_vector(7 downto 0);
+  bch_168_u : entity work.bch_168x8
+    generic map (SEED => (others => '0'))
+    port map (
+      clk   => clk,
+      reset => rst,
+      fd    => first_word,
+      nd    => wr_en_array(CRC_168_INDEX),
+      rdy   => crc_rdy_array(CRC_168_INDEX),
+      d     => std_ulogic_vector(wr_data),
+      c     => crc_168_ulogic,
+      -- CRC output
+      o     => data_out_168_ulogic);
 
-    signal crc_128_ulogic      : std_ulogic_vector(127 downto 0);
-    signal data_out_128_ulogic : std_ulogic_vector(7 downto 0);
+  bch_160_u : entity work.bch_160x8
+    generic map (SEED => (others => '0'))
+    port map (
+      clk   => clk,
+      reset => rst,
+      fd    => first_word,
+      nd    => wr_en_array(CRC_160_INDEX),
+      rdy   => crc_rdy_array(CRC_160_INDEX),
+      d     => std_ulogic_vector(wr_data),
+      c     => crc_160_ulogic,
+      -- CRC output
+      o     => data_out_160_ulogic);
 
-  begin
-    bch_192_u : entity work.bch_192x8
-      generic map (SEED => (others => '0'))
-      port map (
-        clk   => clk,
-        reset => rst,
-        fd    => first_word,
-        nd    => wr_en_array(CRC_192_INDEX),
-        rdy   => crc_rdy_array(CRC_192_INDEX),
-        d     => std_ulogic_vector(wr_data),
-        c     => crc_192_ulogic,
-        -- CRC output
-        o     => data_out_192_ulogic);
+  bch_128_u : entity work.bch_128x8
+    generic map (SEED => (others => '0'))
+    port map (
+      clk   => clk,
+      reset => rst,
+      fd    => first_word,
+      nd    => wr_en_array(CRC_128_INDEX),
+      rdy   => crc_rdy_array(CRC_128_INDEX),
+      d     => std_ulogic_vector(wr_data),
+      c     => crc_128_ulogic,
+      -- CRC output
+      o     => data_out_128_ulogic);
 
-    bch_168_u : entity work.bch_168x8
-      generic map (SEED => (others => '0'))
-      port map (
-        clk   => clk,
-        reset => rst,
-        fd    => first_word,
-        nd    => wr_en_array(CRC_168_INDEX),
-        rdy   => crc_rdy_array(CRC_168_INDEX),
-        d     => std_ulogic_vector(wr_data),
-        c     => crc_168_ulogic,
-        -- CRC output
-        o     => data_out_168_ulogic);
+  -- Assign vector outpus
+  crc_out_array(CRC_192_INDEX)               <= std_logic_vector(crc_192_ulogic);
+  data_out_array(CRC_192_INDEX)              <= std_logic_vector(data_out_192_ulogic);
 
-    bch_160_u : entity work.bch_160x8
-      generic map (SEED => (others => '0'))
-      port map (
-        clk   => clk,
-        reset => rst,
-        fd    => first_word,
-        nd    => wr_en_array(CRC_160_INDEX),
-        rdy   => crc_rdy_array(CRC_160_INDEX),
-        d     => std_ulogic_vector(wr_data),
-        c     => crc_160_ulogic,
-        -- CRC output
-        o     => data_out_160_ulogic);
+  crc_out_array(CRC_160_INDEX)(159 downto 0) <= std_logic_vector(crc_160_ulogic);
+  data_out_array(CRC_160_INDEX)              <= std_logic_vector(data_out_160_ulogic);
 
-    bch_128_u : entity work.bch_128x8
-      generic map (SEED => (others => '0'))
-      port map (
-        clk   => clk,
-        reset => rst,
-        fd    => first_word,
-        nd    => wr_en_array(CRC_128_INDEX),
-        rdy   => crc_rdy_array(CRC_128_INDEX),
-        d     => std_ulogic_vector(wr_data),
-        c     => crc_128_ulogic,
-        -- CRC output
-        o     => data_out_128_ulogic);
+  crc_out_array(CRC_168_INDEX)(167 downto 0) <= std_logic_vector(crc_168_ulogic);
+  data_out_array(CRC_168_INDEX)              <= std_logic_vector(data_out_168_ulogic);
 
-    -- Assign vector outpus
-    crc_out_array(CRC_192_INDEX)               <= std_logic_vector(crc_192_ulogic);
-    data_out_array(CRC_192_INDEX)              <= std_logic_vector(data_out_192_ulogic);
-
-    crc_out_array(CRC_160_INDEX)(159 downto 0) <= std_logic_vector(crc_160_ulogic);
-    data_out_array(CRC_160_INDEX)              <= std_logic_vector(data_out_160_ulogic);
-
-    crc_out_array(CRC_168_INDEX)(167 downto 0) <= std_logic_vector(crc_168_ulogic);
-    data_out_array(CRC_168_INDEX)              <= std_logic_vector(data_out_168_ulogic);
-
-    crc_out_array(CRC_128_INDEX)(127 downto 0)  <= std_logic_vector(crc_128_ulogic);
-    data_out_array(CRC_128_INDEX)               <= std_logic_vector(data_out_128_ulogic);
-
-  end generate;
+  crc_out_array(CRC_128_INDEX)(127 downto 0)  <= std_logic_vector(crc_128_ulogic);
+  data_out_array(CRC_128_INDEX)               <= std_logic_vector(data_out_128_ulogic);
 
   ------------------------------
   -- Asynchronous assignments --

@@ -123,8 +123,8 @@ begin
 
   bch_encoder_u : entity work.axi_bch_encoder
     generic map (
-      TDATA_WIDTH => DATA_WIDTH,
-      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH
+    )
     port map (
       -- Usual ports
       clk            => clk,
