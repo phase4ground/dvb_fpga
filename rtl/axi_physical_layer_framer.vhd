@@ -89,6 +89,7 @@ begin
   -- Port mappings --
   -------------------
   input_delay_block : block
+    signal tdata_in_agg : std_logic_vector(TDATA_WIDTH downto 0);
     signal tdata_out_agg : std_logic_vector(TDATA_WIDTH downto 0);
   begin
     input_delay_u : entity fpga_cores.axi_stream_delay
@@ -103,13 +104,14 @@ begin
         -- AXI slave input
         s_tvalid => s_tvalid,
         s_tready => s_tready_i,
-        s_tdata  => s_tlast & s_tdata,
+        s_tdata  => tdata_in_agg,
 
         -- AXI master output
         m_tvalid => sampled.tvalid,
         m_tready => sampled.tready,
         m_tdata  => tdata_out_agg);
 
+      tdata_in_agg <= s_tlast & s_tdata;
       sampled.tdata <= tdata_out_agg(TDATA_WIDTH - 1 downto 0);
       sampled.tlast <= tdata_out_agg(TDATA_WIDTH);
     end block;

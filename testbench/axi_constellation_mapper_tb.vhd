@@ -162,7 +162,7 @@ begin
   end block axi_file_reader_block;
 
   dut : entity work.axi_constellation_mapper
-  generic map ( INPUT_DATA_WIDTH => INPUT_DATA_WIDTH )
+    generic map ( INPUT_DATA_WIDTH => INPUT_DATA_WIDTH )
     port map (
       -- Usual ports
       clk               => clk,
@@ -427,21 +427,6 @@ begin
     constant logger      : logger_t := get_logger("receiver");
     variable word_cnt    : natural  := 0;
     variable frame_cnt   : natural  := 0;
-
-    function to_real ( constant v : signed ) return real is
-      constant width : integer := v'length;
-    begin
-      return real(to_integer(v)) / real(2**(width - 1));
-    end;
-
-    function to_complex ( constant v : std_logic_vector ) return complex is
-      constant width : integer := v'length;
-    begin
-      return complex'(
-        re => to_real(signed(v(width - 1 downto width/2))),
-        im => to_real(signed(v(width/2 - 1 downto 0)))
-      );
-    end function;
 
     constant TOLERANCE        : real := 0.05;
     variable recv_r           : complex;

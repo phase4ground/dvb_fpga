@@ -71,23 +71,6 @@ architecture axi_bit_interleaver_tb of axi_bit_interleaver_tb is
 
   constant DBG_CHECK_FRAME_RAM_WRITES : boolean := False;
 
-  function get_checker_data_ratio ( constant constellation : in constellation_t)
-  return string is
-  begin
-    case constellation is
-      when   mod_8psk => return "3:8";
-      when mod_16apsk => return "4:8";
-      when mod_32apsk => return "5:8";
-      when others =>
-        report "Invalid constellation: " & constellation_t'image(constellation)
-        severity Failure;
-    end case;
-
-    -- Just to avoid the warning, should never be reached
-    return "";
-
-  end;
-
   -------------
   -- Signals --
   -------------
@@ -359,7 +342,15 @@ begin
         info(sformat("[%d / %d] Updated expected TID to %r", fo(frame_cnt), fo(word_cnt), fo(expected_tid)));
       end if;
 
-      check_equal(axi_slave.tuser, expected_tid, sformat("[%d / %d] Got %r, expected %r", fo(frame_cnt), fo(word_cnt), fo(axi_slave.tuser), fo(expected_tid)));
+      check_equal(
+        axi_slave.tuser,
+        expected_tid,
+        sformat(
+          "[%d / %d] TID check error: got %r, expected %r",
+          fo(frame_cnt),
+          fo(word_cnt),
+          fo(axi_slave.tuser),
+          fo(expected_tid)));
 
       first_word := False;
       word_cnt   := word_cnt + 1;

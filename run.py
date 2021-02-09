@@ -749,6 +749,12 @@ def setupTests(vunit, args):
                     test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=3,
                 ),
             )
+            vunit.library("lib").entity("axi_physical_layer_scrambler_tb").add_config(
+                name=config.name,
+                generics=dict(
+                    test_cfg=config.getTestConfigString(), NUMBER_OF_TEST_FRAMES=3,
+                ),
+            )
         for config in PLFRAME_HEADER_CONFIGS & CONSTELLATION_MAPPER_CONFIGS:
             vunit.library("lib").entity("dvbs2_tx_tb").add_config(
                 name=config.name,
@@ -760,6 +766,10 @@ def setupTests(vunit, args):
     else:
         addAllConfigsTest(
             vunit.library("lib").entity("axi_plframe_header_tb"),
+            configs=PLFRAME_HEADER_CONFIGS,
+        )
+        addAllConfigsTest(
+            vunit.library("lib").entity("axi_physical_layer_scrambler_tb"),
             configs=PLFRAME_HEADER_CONFIGS,
         )
 
@@ -802,16 +812,9 @@ def setupTests(vunit, args):
         name="test",
         generics=dict(
             test_cfg=TestDefinition.fromConfigTuple(
-                FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C1_2
-            ).getTestConfigString()
-        ),
-    )
-    vunit.library("lib").entity("axi_physical_layer_scrambler_tb").add_config(
-        name="test",
-        generics=dict(
-            test_cfg=TestDefinition.fromConfigTuple(
-                FrameType.FECFRAME_SHORT, ConstellationType.MOD_QPSK, CodeRate.C1_2
-            ).getTestConfigString()
+                FrameType.FECFRAME_NORMAL, ConstellationType.MOD_QPSK, CodeRate.C1_2
+            ).getTestConfigString(),
+            NUMBER_OF_TEST_FRAMES=3,
         ),
     )
 

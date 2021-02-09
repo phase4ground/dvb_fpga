@@ -33,9 +33,6 @@ library vunit_lib;
 context vunit_lib.vunit_context;
 context vunit_lib.com_context;
 
-library osvvm;
-use osvvm.RandomPkg.all;
-
 library str_format;
 use str_format.str_format_pkg.all;
 
@@ -77,6 +74,7 @@ architecture axi_physical_layer_framer_tb of axi_physical_layer_framer_tb is
 
   -- AXI input
   signal axi_master         : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
+  signal axi_master_tdata   : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal m_data_valid       : boolean;
 
   signal axi_slave          : axi_stream_bus_t(tdata(TDATA_WIDTH - 1 downto 0), tuser(ENCODED_CONFIG_WIDTH - 1 downto 0));
@@ -85,6 +83,7 @@ architecture axi_physical_layer_framer_tb of axi_physical_layer_framer_tb is
   signal expected_tdata     : std_logic_vector(TDATA_WIDTH - 1 downto 0);
   signal expected_tlast     : std_logic;
 
+  signal dbg_input          : complex;
   signal dbg_recv           : complex;
   signal dbg_expected       : complex;
 begin
@@ -130,8 +129,7 @@ begin
       s_tvalid          => axi_master.tvalid,
       s_tlast           => axi_master.tlast,
       s_tready          => axi_master.tready,
-      -- s_tdata           => axi_master.tdata,
-      s_tdata           => axi_master.tdata(23 downto 16) & axi_master.tdata(31 downto 24) & axi_master.tdata(7 downto 0) & axi_master.tdata(15 downto 8),
+      s_tdata           => axi_master_tdata,
       s_tid             => axi_master.tuser,
 
       -- AXI output
@@ -151,7 +149,6 @@ begin
       rst                => rst,
       -- Data output
       m_tready           => axi_slave.tready and axi_slave.tvalid,
-      -- m_tdata            => axi_slave.tdata(23 downto 16) & axi_slave.tdata(31 downto 24) & axi_slave.tdata(7 downto 0) & axi_slave.tdata(15 downto 8),
       m_tdata(31 downto 24) => expected_tdata(23 downto 16),
       m_tdata(23 downto 16) => expected_tdata(31 downto 24),
       m_tdata(15 downto 8)  => expected_tdata(7 downto 0),
@@ -170,6 +167,12 @@ begin
 
   m_data_valid <= axi_slave.tvalid = '1' and axi_slave.tready = '1';
   s_data_valid <= axi_master.tvalid = '1' and axi_master.tready = '1';
+
+  axi_master_tdata <= axi_master.tdata(23 downto 16) & axi_master.tdata(31 downto 24) & axi_master.tdata(7 downto 0) & axi_master.tdata(15 downto 8);
+
+  dbg_input    <= to_complex(axi_master_tdata) when axi_master.tvalid = '1';
+  dbg_recv     <= to_complex(axi_slave.tdata) when axi_slave.tvalid = '1';
+  dbg_expected <= to_complex(expected_tdata) when axi_slave.tvalid and axi_slave.tready;
 
   ---------------
   -- Processes --
@@ -300,26 +303,39 @@ begin
   end process;
 
   tid_check_p : process -- {{ ----------------------------------------------------------
-    constant self           : actor_t := new_actor("tid_check");
-    variable msg            : msg_t;
-    variable expected_tid   : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
-    variable first_word     : boolean;
+    constant self         : actor_t := new_actor("tid_check");
+    variable msg          : msg_t;
+    variable expected_tid : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
+    variable first_word   : boolean;
+    variable frame_cnt    : integer := 0;
+    variable word_cnt     : integer := 0;
   begin
     first_word := True;
     while true loop
-      wait until rising_edge(clk) and axi_master.tvalid = '1' and axi_master.tready = '1';
+      wait until rising_edge(clk) and axi_slave.tvalid = '1' and axi_slave.tready = '1';
       if first_word then
         check_true(has_message(self), "Expected TID not set");
         receive(net, self, msg);
         expected_tid := pop(msg);
-        info(sformat("Updated expected TID to %r", fo(expected_tid)));
+        info(sformat("[%d / %d] Updated expected TID to %r", fo(frame_cnt), fo(word_cnt), fo(expected_tid)));
       end if;
 
-      check_equal(axi_master.tuser, expected_tid, "TID check failed");
+      check_equal(
+        axi_slave.tuser,
+        expected_tid,
+        sformat(
+          "[%d / %d] TID check error: got %r, expected %r",
+          fo(frame_cnt),
+          fo(word_cnt),
+          fo(axi_slave.tuser),
+          fo(expected_tid)));
 
       first_word := False;
-      if axi_master.tlast = '1' then
-        info("Setting first word");
+      word_cnt   := word_cnt + 1;
+      if axi_slave.tlast = '1' then
+        info(sformat("[%d / %d] Setting first word", fo(frame_cnt), fo(word_cnt)));
+        frame_cnt  := frame_cnt + 1;
+        word_cnt   := 0;
         first_word := True;
       end if;
     end loop;
@@ -329,21 +345,6 @@ begin
     constant logger      : logger_t := get_logger("receiver");
     variable word_cnt    : natural  := 0;
     variable frame_cnt   : natural  := 0;
-
-    function to_real ( constant v : signed ) return real is
-      constant width : integer := v'length;
-    begin
-      return real(to_integer(v)) / real(2**(width - 1));
-    end;
-
-    function to_complex ( constant v : std_logic_vector ) return complex is
-      constant width : integer := v'length;
-    begin
-      return complex'(
-        re => to_real(signed(v(width - 1 downto width/2))),
-        im => to_real(signed(v(width/2 - 1 downto 0)))
-      );
-    end function;
 
     constant TOLERANCE   : real := 0.05;
     variable recv_r      : complex;
@@ -358,9 +359,6 @@ begin
     recv_r           := to_complex(axi_slave.tdata);
     expected_r       := to_complex(expected_tdata);
 
-    dbg_recv     <= recv_r;
-    dbg_expected <= expected_r;
-
     recv_p           := complex_to_polar(recv_r);
     expected_p       := complex_to_polar(expected_r);
 
@@ -374,24 +372,6 @@ begin
         logger,
         sformat(
           "[%d, %d] Comparison failed. " & lf &
-          "Got      %r %r rect(%s, %s) / polar(%s, %s)" & lf &
-          "Expected %r %r rect(%s, %s) / polar(%s, %s)",
-          fo(frame_cnt),
-          fo(word_cnt),
-          fo(axi_slave.tdata(TDATA_WIDTH - 1 downto TDATA_WIDTH/2)),
-          fo(axi_slave.tdata(TDATA_WIDTH/2 - 1 downto 0)),
-          real'image(recv_r.re), real'image(recv_r.im),
-          real'image(recv_p.mag), real'image(recv_p.arg),
-          fo(expected_tdata(TDATA_WIDTH - 1 downto TDATA_WIDTH/2)),
-          fo(expected_tdata(TDATA_WIDTH/2 - 1 downto 0)),
-          real'image(expected_r.re), real'image(expected_r.im),
-          real'image(expected_p.mag), real'image(expected_p.arg)
-        ));
-    else
-      info(
-        logger,
-        sformat(
-          "[%d, %d] Comparison passed. " & lf &
           "Got      %r %r rect(%s, %s) / polar(%s, %s)" & lf &
           "Expected %r %r rect(%s, %s) / polar(%s, %s)",
           fo(frame_cnt),

@@ -110,9 +110,9 @@ def get_ratio(constellation):
 class UnknownFrameLength(Exception):
     def __init__(self, frame_type, code_rate):
         if frame_type == dtv.FECFRAME_NORMAL:
-            self.frame_type = 'FECFRAME_NORMAL'
+            self.frame_type = "FECFRAME_NORMAL"
         elif frame_type == dtv.FECFRAME_SHORT:
-            self.frame_type = 'FECFRAME_SHORT'
+            self.frame_type = "FECFRAME_SHORT"
         else:
             self.frame_type = frame_type
 
@@ -240,14 +240,14 @@ class dvbs2_tx(gr.top_block):
             self.get_physical_layer_frame_size(dtv.PILOTS_OFF)
             - physical_layer_header_length,
             self.get_physical_layer_frame_size(dtv.PILOTS_OFF),
-            0,
+            physical_layer_header_length,
         )
         self.keep_plframe_payload_pilots_on = blocks.keep_m_in_n(
             gr.sizeof_gr_complex,
             self.get_physical_layer_frame_size(dtv.PILOTS_ON)
             - physical_layer_header_length,
             self.get_physical_layer_frame_size(dtv.PILOTS_ON),
-            0,
+            physical_layer_header_length,
         )
         self.keep_plframe_header_pilots_off = blocks.keep_m_in_n(
             gr.sizeof_gr_complex,
@@ -456,7 +456,9 @@ class dvbs2_tx(gr.top_block):
         self.connect(
             (self.dtv_dvbs2_modulator_bc_0, 0), (self.bit_mapper_complex_to_float, 0)
         )
-        self.connect((self.dtv_dvbs2_modulator_bc_0, 0), (self.bit_mapper_output_float, 0))
+        self.connect(
+            (self.dtv_dvbs2_modulator_bc_0, 0), (self.bit_mapper_output_float, 0)
+        )
         self.connect((self.dtv_dvbs2_modulator_bc_0, 0), (self.organize, 0))
         self.connect(
             (self.dtv_dvbs2_physical_cc_pilots_off, 0),

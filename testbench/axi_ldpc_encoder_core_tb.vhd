@@ -775,10 +775,12 @@ begin
   -- ghdl translate_on
 
   tid_check_p : process -- {{ ----------------------------------------------------------
-    constant self           : actor_t := new_actor("tid_check");
-    variable msg            : msg_t;
-    variable expected_tid   : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
-    variable first_word     : boolean;
+    constant self         : actor_t := new_actor("tid_check");
+    variable msg          : msg_t;
+    variable expected_tid : std_logic_vector(ENCODED_CONFIG_WIDTH - 1 downto 0);
+    variable first_word   : boolean;
+    variable frame_cnt    : integer := 0;
+    variable word_cnt     : integer := 0;
   begin
     first_word := True;
     while true loop
@@ -787,14 +789,25 @@ begin
         check_true(has_message(self), "Expected TID not set");
         receive(net, self, msg);
         expected_tid := pop(msg);
-        info(sformat("Updated expected TID to %r", fo(expected_tid)));
+        info(sformat("[%d / %d] Updated expected TID to %r", fo(frame_cnt), fo(word_cnt), fo(expected_tid)));
       end if;
 
-      check_equal(axi_slave.tuser, expected_tid, "TID check failed");
+      check_equal(
+        axi_slave.tuser,
+        expected_tid,
+        sformat(
+          "[%d / %d] TID check error: got %r, expected %r",
+          fo(frame_cnt),
+          fo(word_cnt),
+          fo(axi_slave.tuser),
+          fo(expected_tid)));
 
       first_word := False;
+      word_cnt   := word_cnt + 1;
       if axi_slave.tlast = '1' then
-        info("Setting first word");
+        info(sformat("[%d / %d] Setting first word", fo(frame_cnt), fo(word_cnt)));
+        frame_cnt  := frame_cnt + 1;
+        word_cnt   := 0;
         first_word := True;
       end if;
     end loop;

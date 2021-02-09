@@ -1,3 +1,4 @@
+-- vim: set foldmethod=marker foldmarker=--\ {{,--\ }} :
 --
 -- DVB FPGA
 --
@@ -29,9 +30,6 @@ use ieee.numeric_std.all;
 library vunit_lib;
 context vunit_lib.vunit_context;
 context vunit_lib.com_context;
-
-library osvvm;
-use osvvm.RandomPkg.all;
 
 library str_format;
 use str_format.str_format_pkg.all;
@@ -94,32 +92,6 @@ begin
   -------------------
   -- Port mappings --
   -------------------
-  dut : entity work.axi_bch_encoder
-    generic map (
-      TDATA_WIDTH => TDATA_WIDTH,
-      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
-    port map (
-      -- Usual ports
-      clk            => clk,
-      rst            => rst,
-
-      cfg_frame_type => decode(axi_master.tuser).frame_type,
-      cfg_code_rate  => decode(axi_master.tuser).code_rate,
-
-      -- AXI input
-      s_tvalid       => axi_master.tvalid,
-      s_tlast        => axi_master.tlast,
-      s_tready       => axi_master.tready,
-      s_tdata        => axi_master.tdata,
-      s_tid          => axi_master.tuser,
-
-      -- AXI output
-      m_tready       => axi_slave.tready,
-      m_tvalid       => axi_slave.tvalid,
-      m_tlast        => axi_slave.tlast,
-      m_tdata        => axi_slave.tdata,
-      m_tid          => axi_slave.tuser);
-
   axi_file_reader_u : entity fpga_cores_sim.axi_file_reader
     generic map (
       READER_NAME => "axi_file_reader_u",
@@ -132,13 +104,36 @@ begin
       -- Config and status
       completed          => open,
       tvalid_probability => tvalid_probability,
-
       -- Data output
       m_tready           => axi_master.tready,
       m_tdata            => axi_master.tdata,
       m_tid              => axi_master.tuser,
       m_tvalid           => axi_master.tvalid,
       m_tlast            => axi_master.tlast);
+
+  dut : entity work.axi_bch_encoder
+    generic map (
+      TDATA_WIDTH => TDATA_WIDTH,
+      TID_WIDTH   => ENCODED_CONFIG_WIDTH)
+    port map (
+      -- Usual ports
+      clk            => clk,
+      rst            => rst,
+      -- Config input
+      cfg_frame_type => decode(axi_master.tuser).frame_type,
+      cfg_code_rate  => decode(axi_master.tuser).code_rate,
+      -- AXI input
+      s_tvalid       => axi_master.tvalid,
+      s_tlast        => axi_master.tlast,
+      s_tready       => axi_master.tready,
+      s_tdata        => axi_master.tdata,
+      s_tid          => axi_master.tuser,
+      -- AXI output
+      m_tready       => axi_slave.tready,
+      m_tvalid       => axi_slave.tvalid,
+      m_tlast        => axi_slave.tlast,
+      m_tdata        => axi_slave.tdata,
+      m_tid          => axi_slave.tuser);
 
   axi_file_compare_u : entity fpga_cores_sim.axi_file_compare
     generic map (
@@ -322,7 +317,15 @@ begin
         info(sformat("[%d / %d] Updated expected TID to %r", fo(frame_cnt), fo(word_cnt), fo(expected_tid)));
       end if;
 
-      check_equal(axi_slave.tuser, expected_tid, sformat("[%d / %d] Got %r, expected %r", fo(frame_cnt), fo(word_cnt), fo(axi_slave.tuser), fo(expected_tid)));
+      check_equal(
+        axi_slave.tuser,
+        expected_tid,
+        sformat(
+          "[%d / %d] TID check error: got %r, expected %r",
+          fo(frame_cnt),
+          fo(word_cnt),
+          fo(axi_slave.tuser),
+          fo(expected_tid)));
 
       first_word := False;
       word_cnt   := word_cnt + 1;

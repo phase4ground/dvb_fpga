@@ -22,6 +22,9 @@ use std.textio.all;
 
 library ieee;
 use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+use ieee.math_real.all;
+use ieee.math_complex.all;
 
 library vunit_lib;
 context vunit_lib.vunit_context;
@@ -74,6 +77,11 @@ package dvb_sim_utils_pkg is
   impure function pop(msg : msg_t) return code_rate_t;
 
   impure function pop(msg : msg_t) return config_t;
+
+  function to_real ( constant v : signed ) return real;
+  function to_complex ( constant v : std_logic_vector ) return complex;
+
+  function get_checker_data_ratio ( constant constellation : in constellation_t) return string;
 
 end dvb_sim_utils_pkg;
 
@@ -248,5 +256,36 @@ package body dvb_sim_utils_pkg is
       & "input=" & quote(config.input) & ", "
       & "reference=" & quote(config.reference) & ")";
   end function to_string;
+
+  function to_real ( constant v : signed ) return real is
+    constant width : integer := v'length;
+  begin
+    return real(to_integer(v)) / real(2**(width - 1));
+  end;
+
+  function to_complex ( constant v : std_logic_vector ) return complex is
+    constant width : integer := v'length;
+  begin
+    return complex'(
+      re => to_real(signed(v(width - 1 downto width/2))),
+      im => to_real(signed(v(width/2 - 1 downto 0)))
+    );
+  end function;
+
+  function get_checker_data_ratio ( constant constellation : in constellation_t)
+  return string is
+  begin
+    case constellation is
+      when   mod_8psk => return "3:8";
+      when mod_16apsk => return "4:8";
+      when mod_32apsk => return "5:8";
+      when others =>
+        report "Invalid constellation: " & constellation_t'image(constellation)
+        severity Failure;
+    end case;
+    -- Just to avoid the warning, should never be reached
+    return "";
+  end;
+
 
 end package body;
